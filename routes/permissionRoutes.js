@@ -1,9 +1,16 @@
+// routes/permissionRoutes.js
 const express = require("express");
-const { assignPermission } = require("../controllers/permissionController");
+const {
+  assignPermission,
+  getResourcePermissions,
+  removePermission,
+} = require("../controllers/permissionController");
 const authMiddleware = require("../middlewares/authMiddleware");
 
 const router = express.Router();
 
-router.post("/", authMiddleware, assignPermission);
+router.post("/assign", authMiddleware, assignPermission);
+router.get("/resource", authMiddleware, getResourcePermissions);
+router.delete("/remove", authMiddleware, removePermission);
 
 module.exports = router;
