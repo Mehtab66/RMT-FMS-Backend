@@ -7,34 +7,34 @@ const knex = require("../config/db");
 // services/folderService.js - Improve ensureFolderPath
 
 const ensureFolderPath = async (folderPath, parentId, userId) => {
-  if (!folderPath || folderPath === '.' || folderPath === '/') {
+  if (!folderPath || folderPath === "." || folderPath === "/") {
     return parentId;
   }
 
-  const parts = folderPath.split(/[\\/]/).filter(p => p && p.trim() !== '');
+  const parts = folderPath.split(/[\\/]/).filter((p) => p && p.trim() !== "");
   let currentParentId = parentId;
 
   for (const folderName of parts) {
-    if (!folderName || folderName.trim() === '') continue;
+    if (!folderName || folderName.trim() === "") continue;
 
     // Check if folder already exists
-    let folder = await knex('folders')
-      .where({ 
-        name: folderName, 
-        parent_id: currentParentId 
+    let folder = await knex("folders")
+      .where({
+        name: folderName,
+        parent_id: currentParentId,
       })
       .first();
 
     // Create folder if it doesn't exist
     if (!folder) {
-      const [folderId] = await knex('folders').insert({
+      const [folderId] = await knex("folders").insert({
         name: folderName,
         parent_id: currentParentId,
         created_by: userId,
         created_at: new Date(),
         updated_at: new Date(),
       });
-      
+
       folder = { id: folderId, name: folderName };
       console.log(`Created folder: ${folderName} with ID: ${folderId}`);
     }
@@ -51,7 +51,6 @@ const createFolder = async (name, parentId, userId) => {
     parent_id: parentId,
     created_by: userId,
     created_at: new Date(),
-    updated_at: new Date(),
   });
   return { id: folderId, name, parent_id: parentId };
 };

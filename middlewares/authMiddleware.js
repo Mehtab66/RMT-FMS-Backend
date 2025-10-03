@@ -3,6 +3,7 @@ const knex = require("../config/db");
 
 const authMiddleware = async (req, res, next) => {
   console.log("into the auth midddleware");
+  // console.log(req.body);
 
   const token = req.header("Authorization")?.replace("Bearer ", "");
 
@@ -10,6 +11,7 @@ const authMiddleware = async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await knex("users").where({ id: decoded.userId }).first();
+    // console.log(user);
 
     if (!user) {
       console.log("no user found");

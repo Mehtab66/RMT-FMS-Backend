@@ -14,6 +14,8 @@ const {
 
 const createfolder = async (req, res, next) => {
   try {
+    console.log("into the  controller");
+    
     const { name, parent_id } = req.body;
     req.resourceType = "folder";
     req.resourceId = parent_id || null;
@@ -22,6 +24,8 @@ const createfolder = async (req, res, next) => {
     const folder = await createFolder(name, parent_id, req.user.id);
     res.json(folder);
   } catch (err) {
+    console.log("error in controller", err);
+    
     next(err);
   }
 };

@@ -14,6 +14,7 @@ const checkPermission = require("../middlewares/permissionMiddleware");
 const path = require("path"); // Add this if missing
 const fs = require("fs"); // Add this if missing
 const router = express.Router();
+const db = require("../config/db");
 const uploadDir = path.join(__dirname, "../uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -60,5 +61,16 @@ router.get("/download/:id", authMiddleware, checkPermission, downloadFile);
 router.get("/", authMiddleware, getFiles);
 router.put("/:id", authMiddleware, checkPermission, updateFileDetails);
 router.delete("/:id", authMiddleware, checkPermission, deleteFileById);
+router.get("/root", authMiddleware, async (req, res, next) => {
+  try {
+    const files = await db("files")
+      .whereNull("folder_id")
+      .select("*")
+      .orderBy("created_at", "desc");
 
+    res.json({ files });
+  } catch (err) {
+    next(err);
+  }
+});
 module.exports = router;
