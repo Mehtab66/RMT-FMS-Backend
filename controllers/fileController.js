@@ -1,4 +1,5 @@
 // controllers/fileController.js
+const knex = require("../config/db");
 const {
   uploadFile,
   uploadFolder,
@@ -7,8 +8,12 @@ const {
   updateFile,
   deleteFile,
   getFileById,
+  toggleFileFavourite,
+  getFavouriteFiles,
+  getTrashFiles,
+  restoreFile,
+  permanentDeleteFile,
 } = require("../services/fileService");
-const knex=require("../config/db");
 const uploadFiles = async (req, res, next) => {
   try {
     const { folder_id } = req.body;
@@ -58,26 +63,42 @@ const uploadFiles = async (req, res, next) => {
 };
 
 const uploadFolderFiles = async (req, res, next) => {
-  console.log(
-    "Upload folder files controller - Files received:",
-    req.files?.length
-  );
+  console.log("🚀 Upload folder files controller called");
+  console.log("Files received:", req.files?.length);
   console.log("Body received:", req.body);
+  console.log("User:", req.user);
 
   try {
-    const { parent_id } = req.body;
+    const { folder_id, parent_id } = req.body;
+    const targetFolderId = folder_id || parent_id;
 
     const files = req.files;
     if (!files || files.length === 0) {
+      console.log("❌ No files uploaded");
       return res.status(400).json({ error: "No files uploaded" });
     }
 
-    console.log("Processing", files.length, "files");
-    const uploadedFiles = await uploadFolder(files, parent_id, req.user.id);
+    console.log("✅ Processing", files.length, "files for folder:", targetFolderId);
+    console.log("User ID:", req.user.id);
+    
+    // Log file details
+    files.forEach((file, index) => {
+      console.log(`📄 File ${index + 1}:`, {
+        originalname: file.originalname,
+        filename: file.filename,
+        webkitRelativePath: file.webkitRelativePath,
+        size: file.size,
+        mimetype: file.mimetype
+      });
+    });
+    
+    const uploadedFiles = await uploadFolder(files, targetFolderId, req.user.id);
+    console.log("✅ Upload completed, returning", uploadedFiles.length, "files");
 
     res.json({ files: uploadedFiles });
   } catch (err) {
-    console.error("Error in uploadFolderFiles:", err);
+    console.error("❌ Error in uploadFolderFiles:", err);
+    console.error("❌ Error stack:", err.stack);
     next(err);
   }
 };
@@ -117,9 +138,75 @@ const downloadFile = async (req, res, next) => {
 
 const getFiles = async (req, res, next) => {
   try {
-    const { folder_id } = req.query;
-    const files = await getUserFiles(req.user.id, folder_id);
-    res.json({ files });
+    const { folder_id, context } = req.query;
+    const userId = req.user.id;
+    
+    console.log(`🔍 getFiles called - folder_id: ${folder_id}, user_id: ${userId}, context: ${context}`);
+    
+    let userFiles;
+    
+    // Handle different contexts
+    if (context === 'favourites') {
+      // Get files from favourite folders that match the folder_id
+      const favouriteFiles = await getFavouriteFiles(userId);
+      userFiles = [];
+      
+      // Find files that match the folder_id in the favourite structure
+      const findFilesInFavourites = (files, targetFolderId) => {
+        for (const file of files) {
+          if (file.folder_id == targetFolderId) {
+            userFiles.push(file);
+          }
+        }
+      };
+      
+      if (folder_id) {
+        findFilesInFavourites(favouriteFiles, folder_id);
+      } else {
+        // If no folder_id, return all favourite files
+        userFiles = favouriteFiles;
+      }
+    } else {
+      // Default dashboard context
+      userFiles = await getUserFiles(userId, folder_id);
+    }
+    
+    console.log(`📁 User files found: ${userFiles.length}`);
+    console.log(`📁 User files:`, userFiles.map(f => ({ id: f.id, name: f.name, folder_id: f.folder_id })));
+    
+    // Get files user has permission to access (only for dashboard context)
+    let permissionFiles = [];
+    if (context !== 'favourites') {
+      const permissionQuery = knex("files")
+        .join("permissions", function() {
+          this.on("files.id", "=", "permissions.resource_id")
+            .andOn("permissions.resource_type", "=", knex.raw("'file'"));
+        })
+        .where("permissions.user_id", userId)
+        .where("permissions.can_read", true)
+        .andWhere("files.is_deleted", false);
+      
+      if (folder_id) {
+        permissionQuery.where("files.folder_id", folder_id);
+      }
+      
+      permissionFiles = await permissionQuery.select("files.*");
+      console.log(`🔐 Permission files found: ${permissionFiles.length}`);
+      console.log(`🔐 Permission files:`, permissionFiles.map(f => ({ id: f.id, name: f.name, folder_id: f.folder_id })));
+    }
+    
+    // Combine and deduplicate files
+    const allFiles = [...userFiles];
+    const existingIds = new Set(userFiles.map(f => f.id));
+    
+    for (const file of permissionFiles) {
+      if (!existingIds.has(file.id)) {
+        allFiles.push(file);
+      }
+    }
+    
+    console.log(`✅ Total files returned: ${allFiles.length}`);
+    res.json({ files: allFiles });
   } catch (err) {
     console.error("Error in getFiles:", err);
     next(err);
@@ -159,6 +246,66 @@ const deleteFileById = async (req, res, next) => {
   }
 };
 
+const toggleFileFavouriteController = async (req, res, next) => {
+  try {
+    const fileId = parseInt(req.params.id);
+
+    req.resourceType = "file";
+    req.resourceId = fileId;
+    req.action = "edit";
+
+    const result = await toggleFileFavourite(fileId);
+    res.json(result);
+  } catch (err) {
+    console.error("Error in toggleFileFavouriteController:", err);
+    next(err);
+  }
+};
+
+const getFavouriteFilesController = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const files = await getFavouriteFiles(userId);
+    res.json({ files });
+  } catch (err) {
+    console.error("Error in getFavouriteFilesController:", err);
+    next(err);
+  }
+};
+
+const getTrashFilesController = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const files = await getTrashFiles(userId);
+    res.json({ files });
+  } catch (err) {
+    console.error("Error in getTrashFilesController:", err);
+    next(err);
+  }
+};
+
+const restoreFileController = async (req, res, next) => {
+  try {
+    const fileId = parseInt(req.params.id);
+    const result = await restoreFile(fileId);
+    res.json(result);
+  } catch (err) {
+    console.error("Error in restoreFileController:", err);
+    next(err);
+  }
+};
+
+const permanentDeleteFileController = async (req, res, next) => {
+  try {
+    const fileId = parseInt(req.params.id);
+    const result = await permanentDeleteFile(fileId);
+    res.json(result);
+  } catch (err) {
+    console.error("Error in permanentDeleteFileController:", err);
+    next(err);
+  }
+};
+
 module.exports = {
   uploadFolderFiles,
   downloadFile,
@@ -166,4 +313,9 @@ module.exports = {
   updateFileDetails,
   deleteFileById,
   uploadFiles,
+  toggleFileFavouriteController,
+  getFavouriteFilesController,
+  getTrashFilesController,
+  restoreFileController,
+  permanentDeleteFileController,
 };

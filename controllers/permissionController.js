@@ -8,12 +8,7 @@ const assignPermission = async (req, res, next) => {
       resource_id,
       resource_type,
       can_read,
-      can_create,
-      can_edit,
       can_download,
-      can_delete,
-      inherit,
-      expires_at,
     } = req.body;
 
     // Check if user is super_admin OR owns the resource
@@ -53,14 +48,9 @@ const assignPermission = async (req, res, next) => {
 
     if (existingPerm) {
       // Update existing permission
-      [permId] = await db("permissions").where({ id: existingPerm.id }).update({
+      await db("permissions").where({ id: existingPerm.id }).update({
         can_read,
-        can_create,
-        can_edit,
         can_download,
-        can_delete,
-        inherit,
-        expires_at,
         updated_at: new Date(),
       });
       permId = existingPerm.id;
@@ -71,15 +61,99 @@ const assignPermission = async (req, res, next) => {
         resource_id,
         resource_type,
         can_read,
-        can_create,
-        can_edit,
         can_download,
-        can_delete,
-        inherit,
-        expires_at,
         created_at: new Date(),
         updated_at: new Date(),
       });
+    }
+
+    // Helper function to apply inheritance to children
+    const applyInheritanceToChildren = async (parentFolderId, userId, can_read, can_download) => {
+      // Get all child folders
+      const childFolders = await db("folders").where({ parent_id: parentFolderId });
+      console.log(`📁 Found ${childFolders.length} child folders for parent ${parentFolderId}`);
+      
+      for (const childFolder of childFolders) {
+        console.log(`🔄 Processing child folder: ${childFolder.name} (ID: ${childFolder.id})`);
+        // Check if permission already exists for this child folder
+        const existingChildPerm = await db("permissions")
+          .where({
+            user_id,
+            resource_id: childFolder.id,
+            resource_type: "folder",
+          })
+          .first();
+
+        if (existingChildPerm) {
+          // Update existing permission
+          console.log(`🔄 Updating existing permission for folder ${childFolder.id}`);
+          await db("permissions").where({ id: existingChildPerm.id }).update({
+            can_read,
+            can_download,
+            updated_at: new Date(),
+          });
+        } else if (can_read || can_download) {
+          // Only create new permission if at least one permission is granted
+          console.log(`➕ Creating new permission for folder ${childFolder.id}: can_read=${can_read}, can_download=${can_download}`);
+          await db("permissions").insert({
+            user_id,
+            resource_id: childFolder.id,
+            resource_type: "folder",
+            can_read,
+            can_download,
+            created_at: new Date(),
+            updated_at: new Date(),
+          });
+        }
+
+        // Recursively apply to grandchildren
+        await applyInheritanceToChildren(childFolder.id, userId, can_read, can_download);
+      }
+
+      // Get all files in this folder
+      const childFiles = await db("files").where({ folder_id: parentFolderId });
+      console.log(`📄 Found ${childFiles.length} child files for parent ${parentFolderId}`);
+      
+      for (const childFile of childFiles) {
+        console.log(`🔄 Processing child file: ${childFile.name} (ID: ${childFile.id})`);
+        // Check if permission already exists for this file
+        const existingFilePerm = await db("permissions")
+          .where({
+            user_id,
+            resource_id: childFile.id,
+            resource_type: "file",
+          })
+          .first();
+
+        if (existingFilePerm) {
+          // Update existing permission
+          console.log(`🔄 Updating existing permission for file ${childFile.id}`);
+          await db("permissions").where({ id: existingFilePerm.id }).update({
+            can_read,
+            can_download,
+            updated_at: new Date(),
+          });
+        } else if (can_read || can_download) {
+          // Only create new permission if at least one permission is granted
+          console.log(`➕ Creating new permission for file ${childFile.id}: can_read=${can_read}, can_download=${can_download}`);
+          await db("permissions").insert({
+            user_id,
+            resource_id: childFile.id,
+            resource_type: "file",
+            can_read,
+            can_download,
+            created_at: new Date(),
+            updated_at: new Date(),
+          });
+        }
+      }
+    };
+
+    // If this is a folder, apply inheritance to all child folders and files
+    if (resource_type === "folder") {
+      console.log(`🌳 Applying inheritance for folder ${resource_id} to user ${user_id}`);
+      await applyInheritanceToChildren(resource_id, user_id, can_read, can_download);
+      console.log(`✅ Inheritance applied successfully`);
     }
 
     res.json({
@@ -91,6 +165,7 @@ const assignPermission = async (req, res, next) => {
   }
 };
 
+
 const getResourcePermissions = async (req, res, next) => {
   try {
     const { resource_id, resource_type } = req.query;
@@ -99,6 +174,20 @@ const getResourcePermissions = async (req, res, next) => {
       .where({ resource_id, resource_type })
       .join("users", "permissions.user_id", "users.id")
       .select("permissions.*", "users.username", "users.role");
+
+    res.json({ permissions });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const getUserPermissions = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    const permissions = await db("permissions")
+      .where({ user_id: userId })
+      .select("*");
 
     res.json({ permissions });
   } catch (err) {
@@ -121,5 +210,6 @@ const removePermission = async (req, res, next) => {
 module.exports = {
   assignPermission,
   getResourcePermissions,
+  getUserPermissions,
   removePermission,
 };

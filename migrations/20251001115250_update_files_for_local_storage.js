@@ -1,26 +1,44 @@
-exports.up = function (knex) {
+exports.up = async function (knex) {
+  // Check if columns already exist using raw SQL
+  const columns = await knex.raw(`
+    SELECT COLUMN_NAME 
+    FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() 
+    AND TABLE_NAME = 'files'
+  `);
+  
+  const existingColumns = columns[0].map(col => col.COLUMN_NAME);
+  const hasMimeType = existingColumns.includes('mime_type');
+  const hasSize = existingColumns.includes('size');
+  const hasOriginalName = existingColumns.includes('original_name');
+  const hasUpdatedAt = existingColumns.includes('updated_at');
+  const hasCloudinaryPublicId = existingColumns.includes('cloudinary_public_id');
+  const hasCloudinaryUrl = existingColumns.includes('cloudinary_url');
+
   return knex.schema.alterTable("files", function (table) {
-    // Rename cloudinary fields to local storage fields
-    table.renameColumn("cloudinary_public_id", "file_path");
-    table.renameColumn("cloudinary_url", "file_url");
+    // Rename cloudinary fields to local storage fields (only if they exist)
+    if (hasCloudinaryPublicId) {
+      table.renameColumn("cloudinary_public_id", "file_path");
+    }
+    if (hasCloudinaryUrl) {
+      table.renameColumn("cloudinary_url", "file_url");
+    }
 
-    // Add new fields for better file management
-    table.string("mime_type"); // e.g., 'image/jpeg', 'application/pdf'
-    table.bigInteger("size"); // File size in bytes
-    table.string("original_name"); // Original filename from user
-    table.timestamp("updated_at");
+    // Add new fields for better file management (only if they don't exist)
+    if (!hasMimeType) {
+      table.string("mime_type"); // e.g., 'image/jpeg', 'application/pdf'
+    }
+    if (!hasSize) {
+      table.bigInteger("size"); // File size in bytes
+    }
+    if (!hasOriginalName) {
+      table.string("original_name"); // Original filename from user
+    }
+    if (!hasUpdatedAt) {
+      table.timestamp("updated_at");
+    }
 
-    // Add foreign keys for data integrity
-    table
-      .foreign("folder_id")
-      .references("id")
-      .inTable("folders")
-      .onDelete("CASCADE");
-    table
-      .foreign("created_by")
-      .references("id")
-      .inTable("users")
-      .onDelete("CASCADE");
+    // Note: Foreign keys for folder_id and created_by already exist from initial table creation
   });
 };
 

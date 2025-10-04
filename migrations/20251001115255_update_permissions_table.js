@@ -12,12 +12,7 @@ exports.up = function (knex) {
     // Prevent duplicate permissions
     table.unique(["user_id", "resource_id", "resource_type"]);
 
-    // Ensure user exists
-    table
-      .foreign("user_id")
-      .references("id")
-      .inTable("users")
-      .onDelete("CASCADE");
+    // Note: Foreign key for user_id already exists from initial table creation
   });
 };
 

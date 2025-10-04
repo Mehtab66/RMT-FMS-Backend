@@ -2,17 +2,7 @@ exports.up = function (knex) {
   return knex.schema.alterTable("folders", function (table) {
     table.timestamp("updated_at");
 
-    // Add foreign keys
-    table
-      .foreign("parent_id")
-      .references("id")
-      .inTable("folders")
-      .onDelete("CASCADE");
-    table
-      .foreign("created_by")
-      .references("id")
-      .inTable("users")
-      .onDelete("CASCADE");
+    // Note: Foreign keys for parent_id and created_by already exist from initial table creation
   });
 };
 
