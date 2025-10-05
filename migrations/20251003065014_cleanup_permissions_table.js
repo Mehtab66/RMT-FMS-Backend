@@ -1,23 +1,19 @@
-/**
- * @param { import("knex").Knex } knex
- * @returns { Promise<void> }
- */
-exports.up = function(knex) {
-  return knex.schema.alterTable('permissions', function(table) {
-    // Drop all unnecessary columns
-    table.dropColumn('can_delete');
-    table.dropColumn('expires_at');
-  });
-};
+export async function up(knex) {
+  const hasColumn = await knex.schema.hasColumn("permissions", "can_delete");
 
-/**
- * @param { import("knex").Knex } knex
- * @returns { Promise<void> }
- */
-exports.down = function(knex) {
-  return knex.schema.alterTable('permissions', function(table) {
-    // Add back the columns if needed to rollback
-    table.boolean('can_delete').defaultTo(false);
-    table.timestamp('expires_at').nullable();
-  });
-};
+  if (hasColumn) {
+    await knex.schema.table("permissions", (table) => {
+      table.dropColumn("can_delete");
+    });
+  }
+}
+
+export async function down(knex) {
+  const hasColumn = await knex.schema.hasColumn("permissions", "can_delete");
+
+  if (!hasColumn) {
+    await knex.schema.table("permissions", (table) => {
+      table.boolean("can_delete").defaultTo(false);
+    });
+  }
+}

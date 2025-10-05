@@ -1,5 +1,8 @@
 // controllers/fileController.js
 const knex = require("../config/db");
+const path = require("path"); // Add this if missing
+const fs = require("fs"); // Add this if missing
+
 const {
   uploadFile,
   uploadFolder,
@@ -61,48 +64,234 @@ const uploadFiles = async (req, res, next) => {
     next(err);
   }
 };
+async function ensureFolderStructure(folderParts, createdBy, parentId = null) {
+  let currentParentId = parentId;
 
-const uploadFolderFiles = async (req, res, next) => {
-  console.log("🚀 Upload folder files controller called");
-  console.log("Files received:", req.files?.length);
-  console.log("Body received:", req.body);
-  console.log("User:", req.user);
+  for (const folderName of folderParts) {
+    if (!folderName || folderName.trim() === "") continue;
 
-  try {
-    const { folder_id, parent_id } = req.body;
-    const targetFolderId = folder_id || parent_id;
+    // Check if this folder already exists under current parent
+    let existingFolder = await knex("folders")
+      .where({
+        name: folderName,
+        parent_id: currentParentId,
+        created_by: createdBy,
+      })
+      .first();
 
-    const files = req.files;
-    if (!files || files.length === 0) {
-      console.log("❌ No files uploaded");
-      return res.status(400).json({ error: "No files uploaded" });
+    if (!existingFolder) {
+      // Create new folder
+      const [newFolderId] = await knex("folders").insert({
+        name: folderName,
+        parent_id: currentParentId,
+        created_by: createdBy,
+        created_at: new Date(),
+        updated_at: new Date(),
+        is_faviourite: false,
+        is_deleted: false,
+      });
+
+      existingFolder = { id: newFolderId };
+      console.log(
+        `📁 [Folder DB] Created folder: ${folderName} (ID: ${newFolderId}) under parent: ${currentParentId}`
+      );
+    } else {
+      console.log(
+        `📁 [Folder DB] Folder already exists: ${folderName} (ID: ${existingFolder.id})`
+      );
     }
 
-    console.log("✅ Processing", files.length, "files for folder:", targetFolderId);
-    console.log("User ID:", req.user.id);
-    
-    // Log file details
-    files.forEach((file, index) => {
-      console.log(`📄 File ${index + 1}:`, {
-        originalname: file.originalname,
-        filename: file.filename,
-        webkitRelativePath: file.webkitRelativePath,
-        size: file.size,
-        mimetype: file.mimetype
-      });
-    });
-    
-    const uploadedFiles = await uploadFolder(files, targetFolderId, req.user.id);
-    console.log("✅ Upload completed, returning", uploadedFiles.length, "files");
+    currentParentId = existingFolder.id;
+  }
 
-    res.json({ files: uploadedFiles });
+  return currentParentId;
+}
+const uploadFolderWithFiles = async (req, res) => {
+  console.log("📂 [Upload Folder] Starting folder upload processing");
+
+  try {
+    const userId = req.user?.id;
+    const files = req.files;
+    const body = req.body;
+
+    console.log("📂 [Upload Folder] Request details:", {
+      userId,
+      fileCount: files ? files.length : 0,
+      hasFiles: !!files,
+    });
+
+    const allPaths = body.allPaths ? JSON.parse(body.allPaths) : [];
+    const paths = body.paths || [];
+    const uploadType = body.uploadType;
+    const parentFolderId = body.folderId ? parseInt(body.folderId) : null;
+
+    console.log("📂 [Upload Folder] Folder structure:", {
+      allPathsCount: allPaths.length,
+      allPaths: allPaths,
+      uploadType,
+      parentFolderId,
+    });
+
+    // Convert paths to array if it's a string
+    const pathsArray = Array.isArray(paths) ? paths : [paths];
+
+    // 🟢 Step 1: Create ALL folder structures in DB and filesystem
+    console.log("🟢 [Upload Folder] Creating complete folder structure...");
+
+    if (allPaths.length > 0) {
+      for (const folderPath of allPaths) {
+        const folderParts = folderPath.split("/").filter(Boolean);
+        if (folderParts.length === 0) continue;
+
+        console.log(`📁 [Upload Folder] Ensuring folder: ${folderPath}`);
+
+        // Create folder in database
+        const folderId = await ensureFolderStructure(
+          folderParts,
+          userId,
+          parentFolderId
+        );
+
+        // Create physical folder in filesystem
+        const localDir = path.join("uploads", ...folderParts);
+        if (!fs.existsSync(localDir)) {
+          fs.mkdirSync(localDir, { recursive: true });
+          console.log(
+            `✅ [Upload Folder] Created physical folder: ${localDir}`
+          );
+        } else {
+          console.log(`ℹ️ [Upload Folder] Folder already exists: ${localDir}`);
+        }
+      }
+    } else {
+      console.log("ℹ️ [Upload Folder] No folder paths to create");
+    }
+
+    // 🟢 Step 2: Process each file
+    if (files && files.length > 0) {
+      console.log(`🟢 [Upload Folder] Processing ${files.length} files...`);
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const relativePath = pathsArray[i] || file.originalname;
+
+        console.log(`📄 [Upload Folder] Processing file ${i + 1}:`, {
+          originalName: file.originalname,
+          relativePath: relativePath,
+          size: file.size,
+        });
+
+        const parts = relativePath.split("/").filter(Boolean);
+        const fileName = parts.pop();
+        const folderParts = parts;
+
+        let folderId = parentFolderId;
+
+        // Ensure folders exist and get the final folder ID (redundant but safe)
+        if (folderParts.length > 0) {
+          folderId = await ensureFolderStructure(
+            folderParts,
+            userId,
+            parentFolderId
+          );
+        }
+
+        // Build correct save path
+        const localDir = path.join("uploads", ...folderParts);
+        const finalPath = path.join(localDir, fileName);
+
+        // Ensure directory exists (should already exist from step 1)
+        if (!fs.existsSync(localDir)) {
+          console.log(
+            `⚠️ [Upload Folder] Folder missing, creating: ${localDir}`
+          );
+          fs.mkdirSync(localDir, { recursive: true });
+        }
+
+        // Move file from temp to final location
+        fs.renameSync(file.path, finalPath);
+
+        // Save file metadata to DB
+        await knex("files").insert({
+          name: fileName,
+          folder_id: folderId,
+          file_path: finalPath,
+          file_url: `/uploads/${path.join(...folderParts, fileName)}`,
+          created_by: userId,
+          created_at: new Date(),
+          updated_at: new Date(),
+          mime_type: file.mimetype,
+          size: file.size,
+          original_name: file.originalname,
+          is_faviourite: false,
+          is_deleted: false,
+        });
+
+        console.log(`✅ [Upload Folder] Saved file: ${finalPath}`);
+      }
+    } else {
+      console.log(
+        "ℹ️ [Upload Folder] No files to process - creating empty folder structure only"
+      );
+    }
+
+    // 🟢 Step 3: Verify and report what was created
+    console.log("🔍 [Upload Folder] Upload completed. Summary:");
+    console.log(`   - Folders created in DB: ${allPaths.length}`);
+    console.log(`   - Files processed: ${files ? files.length : 0}`);
+
+    // Verify empty folders were created
+    if (allPaths.length > 0) {
+      console.log("🔍 [Upload Folder] Checking empty folders:");
+      for (const folderPath of allPaths) {
+        const localDir = path.join(
+          "uploads",
+          ...folderPath.split("/").filter(Boolean)
+        );
+        const isEmpty =
+          fs.existsSync(localDir) && fs.readdirSync(localDir).length === 0;
+        console.log(
+          `   - ${folderPath}: ${isEmpty ? "✅ EMPTY" : "has files"}`
+        );
+      }
+    }
+
+    res.status(200).json({
+      message: `✅ ${
+        uploadType === "folder" ? "Folder" : "Files"
+      } uploaded successfully!`,
+      fileCount: files?.length || 0,
+      folderCount: allPaths.length,
+      emptyFolders: allPaths.filter((folderPath) => {
+        const localDir = path.join(
+          "uploads",
+          ...folderPath.split("/").filter(Boolean)
+        );
+        return fs.existsSync(localDir) && fs.readdirSync(localDir).length === 0;
+      }).length,
+    });
   } catch (err) {
-    console.error("❌ Error in uploadFolderFiles:", err);
-    console.error("❌ Error stack:", err.stack);
-    next(err);
+    console.error("❌ [Upload Folder] Error:", err);
+
+    // Clean up: Remove any uploaded files on error
+    if (req.files) {
+      req.files.forEach((file) => {
+        try {
+          if (fs.existsSync(file.path)) {
+            fs.unlinkSync(file.path);
+          }
+        } catch (cleanupErr) {
+          console.error("Error cleaning up file:", cleanupErr);
+        }
+      });
+    }
+
+    res.status(500).json({
+      message: "Server error during upload",
+      error: err.message,
+    });
   }
 };
-
 const downloadFile = async (req, res, next) => {
   try {
     const fileId = parseInt(req.params.id);
@@ -140,17 +329,19 @@ const getFiles = async (req, res, next) => {
   try {
     const { folder_id, context } = req.query;
     const userId = req.user.id;
-    
-    console.log(`🔍 getFiles called - folder_id: ${folder_id}, user_id: ${userId}, context: ${context}`);
-    
+
+    console.log(
+      `🔍 getFiles called - folder_id: ${folder_id}, user_id: ${userId}, context: ${context}`
+    );
+
     let userFiles;
-    
+
     // Handle different contexts
-    if (context === 'favourites') {
+    if (context === "favourites") {
       // Get files from favourite folders that match the folder_id
       const favouriteFiles = await getFavouriteFiles(userId);
       userFiles = [];
-      
+
       // Find files that match the folder_id in the favourite structure
       const findFilesInFavourites = (files, targetFolderId) => {
         for (const file of files) {
@@ -159,7 +350,7 @@ const getFiles = async (req, res, next) => {
           }
         }
       };
-      
+
       if (folder_id) {
         findFilesInFavourites(favouriteFiles, folder_id);
       } else {
@@ -170,41 +361,54 @@ const getFiles = async (req, res, next) => {
       // Default dashboard context
       userFiles = await getUserFiles(userId, folder_id);
     }
-    
+
     console.log(`📁 User files found: ${userFiles.length}`);
-    console.log(`📁 User files:`, userFiles.map(f => ({ id: f.id, name: f.name, folder_id: f.folder_id })));
-    
+    console.log(
+      `📁 User files:`,
+      userFiles.map((f) => ({ id: f.id, name: f.name, folder_id: f.folder_id }))
+    );
+
     // Get files user has permission to access (only for dashboard context)
     let permissionFiles = [];
-    if (context !== 'favourites') {
+    if (context !== "favourites") {
       const permissionQuery = knex("files")
-        .join("permissions", function() {
-          this.on("files.id", "=", "permissions.resource_id")
-            .andOn("permissions.resource_type", "=", knex.raw("'file'"));
+        .join("permissions", function () {
+          this.on("files.id", "=", "permissions.resource_id").andOn(
+            "permissions.resource_type",
+            "=",
+            knex.raw("'file'")
+          );
         })
         .where("permissions.user_id", userId)
         .where("permissions.can_read", true)
         .andWhere("files.is_deleted", false);
-      
+
       if (folder_id) {
         permissionQuery.where("files.folder_id", folder_id);
       }
-      
+
       permissionFiles = await permissionQuery.select("files.*");
       console.log(`🔐 Permission files found: ${permissionFiles.length}`);
-      console.log(`🔐 Permission files:`, permissionFiles.map(f => ({ id: f.id, name: f.name, folder_id: f.folder_id })));
+      console.log(
+        `🔐 Permission files:`,
+        permissionFiles.map((f) => ({
+          id: f.id,
+          name: f.name,
+          folder_id: f.folder_id,
+        }))
+      );
     }
-    
+
     // Combine and deduplicate files
     const allFiles = [...userFiles];
-    const existingIds = new Set(userFiles.map(f => f.id));
-    
+    const existingIds = new Set(userFiles.map((f) => f.id));
+
     for (const file of permissionFiles) {
       if (!existingIds.has(file.id)) {
         allFiles.push(file);
       }
     }
-    
+
     console.log(`✅ Total files returned: ${allFiles.length}`);
     res.json({ files: allFiles });
   } catch (err) {
@@ -307,7 +511,7 @@ const permanentDeleteFileController = async (req, res, next) => {
 };
 
 module.exports = {
-  uploadFolderFiles,
+  uploadFolderWithFiles,
   downloadFile,
   getFiles,
   updateFileDetails,
