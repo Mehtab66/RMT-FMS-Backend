@@ -326,13 +326,42 @@ const getFilesFromFolderRecursively = async (folderId, userId) => {
   return [...directFiles, ...nestedFiles];
 };
 
-const getTrashFiles = async (userId) => {
-  return knex("files")
-    .leftJoin("folders", "files.folder_id", "folders.id")
-    .select("files.*", "folders.name as folder_name")
-    .where("files.created_by", userId)
-    .andWhere("files.is_deleted", true)
-    .orderBy("files.created_at", "desc");
+const getTrashFiles = async (userId, folderId = null) => {
+  console.log(`🔍 Backend getTrashFiles called - userId: ${userId}, folderId: ${folderId}`);
+  
+  if (folderId === null) {
+    // Get only root-level deleted files (files with no folder or whose folder is not deleted)
+    const files = await knex("files")
+      .leftJoin("folders", "files.folder_id", "folders.id")
+      .select("files.*", "folders.name as folder_name")
+      .where("files.created_by", userId)
+      .andWhere("files.is_deleted", true)
+      .andWhere(function() {
+        this.whereNull("files.folder_id")
+          .orWhereNotExists(function() {
+            this.select("*")
+              .from("folders as folder")
+              .whereRaw("folder.id = files.folder_id")
+              .andWhere("folder.is_deleted", true);
+          });
+      })
+      .orderBy("files.created_at", "desc");
+    
+    console.log(`📁 Backend returning ${files.length} root-level trash files:`, files.map(f => ({ id: f.id, name: f.name, folder_id: f.folder_id })));
+    return files;
+  } else {
+    // Get files within a specific folder
+    const files = await knex("files")
+      .leftJoin("folders", "files.folder_id", "folders.id")
+      .select("files.*", "folders.name as folder_name")
+      .where("files.created_by", userId)
+      .andWhere("files.folder_id", folderId)
+      .andWhere("files.is_deleted", true)
+      .orderBy("files.created_at", "desc");
+    
+    console.log(`📁 Backend returning ${files.length} trash files for folder ${folderId}:`, files.map(f => ({ id: f.id, name: f.name, folder_id: f.folder_id })));
+    return files;
+  }
 };
 
 const restoreFile = async (fileId) => {

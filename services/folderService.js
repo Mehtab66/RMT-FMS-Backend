@@ -197,11 +197,37 @@ const getNestedFiles = async (folderId, userId) => {
     .orderBy("created_at", "desc");
 };
 
-const getTrashFolders = async (userId) => {
-  return knex("folders")
-    .where({ created_by: userId })
-    .andWhere("is_deleted", true)
-    .orderBy("created_at", "desc");
+const getTrashFolders = async (userId, parentId = null) => {
+  console.log(`🔍 Backend getTrashFolders called - userId: ${userId}, parentId: ${parentId}`);
+  
+  if (parentId === null) {
+    // Get only root-level deleted folders (folders with no parent or whose parent is not deleted)
+    const folders = await knex("folders")
+      .where({ created_by: userId })
+      .andWhere("is_deleted", true)
+      .andWhere(function() {
+        this.whereNull("parent_id")
+          .orWhereNotExists(function() {
+            this.select("*")
+              .from("folders as parent")
+              .whereRaw("parent.id = folders.parent_id")
+              .andWhere("parent.is_deleted", true);
+          });
+      })
+      .orderBy("created_at", "desc");
+    
+    console.log(`📁 Backend returning ${folders.length} root-level trash folders:`, folders.map(f => ({ id: f.id, name: f.name, parent_id: f.parent_id })));
+    return folders;
+  } else {
+    // Get folders within a specific parent folder
+    const folders = await knex("folders")
+      .where({ created_by: userId, parent_id: parentId })
+      .andWhere("is_deleted", true)
+      .orderBy("created_at", "desc");
+    
+    console.log(`📁 Backend returning ${folders.length} trash folders for parent ${parentId}:`, folders.map(f => ({ id: f.id, name: f.name, parent_id: f.parent_id })));
+    return folders;
+  }
 };
 
 const restoreFolder = async (folderId) => {
@@ -268,10 +294,87 @@ const permanentDeleteFolder = async (folderId) => {
     .andWhere("is_deleted", true)
     .del();
 
+  // Construct the full folder path BEFORE deleting the folder record
+  const getFolderPath = async (folderId) => {
+    const folder = await knex("folders").where({ id: folderId }).first();
+    if (!folder) return null;
+    
+    const pathParts = [folder.name];
+    let currentParentId = folder.parent_id;
+    
+    // Build path by traversing up the hierarchy
+    while (currentParentId) {
+      const parentFolder = await knex("folders").where({ id: currentParentId }).first();
+      if (parentFolder) {
+        pathParts.unshift(parentFolder.name);
+        currentParentId = parentFolder.parent_id;
+      } else {
+        break;
+      }
+    }
+    
+    return path.join(__dirname, "..", "uploads", ...pathParts);
+  };
+
+  // Get the full folder path BEFORE deleting the folder record
+  const folderPath = await getFolderPath(folderId);
+
   // Delete folder record
   await knex("folders")
     .where({ id: folderId })
     .del();
+
+  // Remove physical folder directory from uploads folder
+  if (folderPath && fs.existsSync(folderPath)) {
+    try {
+      fs.rmSync(folderPath, { recursive: true, force: true });
+      console.log(`🗑️ Removed physical folder directory: ${folderPath}`);
+    } catch (error) {
+      console.error(`❌ Error removing folder directory ${folderPath}:`, error);
+    }
+  } else {
+    console.log(`ℹ️ Folder path not found or doesn't exist: ${folderPath}`);
+  }
+
+  // Clean up ALL empty directories in uploads folder
+  const cleanupAllEmptyDirectories = () => {
+    try {
+      const uploadsDir = path.join(__dirname, "..", "uploads");
+      
+      if (!fs.existsSync(uploadsDir)) {
+        return;
+      }
+      
+      const removeEmptyDirs = (dir) => {
+        if (!fs.existsSync(dir)) return;
+        
+        const files = fs.readdirSync(dir);
+        
+        // Recursively process subdirectories first
+        for (const file of files) {
+          const filePath = path.join(dir, file);
+          const stat = fs.statSync(filePath);
+          if (stat.isDirectory()) {
+            removeEmptyDirs(filePath);
+          }
+        }
+        
+        // Check if directory is empty after processing subdirectories
+        const remainingFiles = fs.readdirSync(dir);
+        if (remainingFiles.length === 0 && dir !== uploadsDir) {
+          fs.rmSync(dir, { recursive: true, force: true });
+          console.log(`🗑️ Removed empty directory: ${dir}`);
+        }
+      };
+      
+      removeEmptyDirs(uploadsDir);
+    } catch (error) {
+      console.error(`❌ Error cleaning up empty directories:`, error);
+    }
+  };
+
+  // Clean up all empty directories in uploads
+  cleanupAllEmptyDirectories();
 
   return { id: folderId, permanentlyDeleted: true };
 };

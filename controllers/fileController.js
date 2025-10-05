@@ -480,7 +480,8 @@ const getFavouriteFilesController = async (req, res, next) => {
 const getTrashFilesController = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const files = await getTrashFiles(userId);
+    const folderId = req.query.folder_id ? parseInt(req.query.folder_id) : null;
+    const files = await getTrashFiles(userId, folderId);
     res.json({ files });
   } catch (err) {
     console.error("Error in getTrashFilesController:", err);
