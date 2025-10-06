@@ -265,7 +265,9 @@ const toggleFileFavourite = async (fileId) => {
 };
 
 const getFavouriteFiles = async (userId) => {
-  // Get files that are directly marked as favourite
+  // Only get files that are directly marked as favourite
+  // Files from favourite folders should NOT be included here
+  // They should only show when navigating into the specific folder
   const directFavouriteFiles = await knex("files")
     .leftJoin("folders", "files.folder_id", "folders.id")
     .select("files.*", "folders.name as folder_name")
@@ -274,29 +276,7 @@ const getFavouriteFiles = async (userId) => {
     .andWhere("files.is_faviourite", true)
     .orderBy("files.created_at", "desc");
 
-  // Get files from favourite folders
-  const favouriteFolderIds = await knex("folders")
-    .where({ created_by: userId })
-    .andWhere("is_deleted", false)
-    .andWhere("is_faviourite", true)
-    .select("id");
-
-  const folderIds = favouriteFolderIds.map(f => f.id);
-  
-  // Get all files from favourite folders (including nested ones)
-  const filesFromFavouriteFolders = [];
-  for (const folderId of folderIds) {
-    const nestedFiles = await getFilesFromFolderRecursively(folderId, userId);
-    filesFromFavouriteFolders.push(...nestedFiles);
-  }
-
-  // Combine both lists and remove duplicates
-  const allFiles = [...directFavouriteFiles, ...filesFromFavouriteFolders];
-  const uniqueFiles = allFiles.filter((file, index, self) => 
-    index === self.findIndex(f => f.id === file.id)
-  );
-
-  return uniqueFiles;
+  return directFavouriteFiles;
 };
 
 // Helper function to get all files from a folder recursively
