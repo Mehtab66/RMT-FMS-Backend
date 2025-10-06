@@ -124,99 +124,221 @@ const getFolderTree = async (userId) => {
     .select("id", "name", "parent_id")
     .where({ created_by: userId });
 };
+// Recursively get all nested folder IDs
+const getAllNestedFolderIds = async (parentId) => {
+  const children = await knex("folders")
+    .where({ parent_id: parentId })
+    .andWhere("is_deleted", false)
+    .select("id");
 
-const toggleFolderFavourite = async (folderId) => {
-  const folder = await getFolder(folderId);
+  let allIds = children.map((c) => c.id);
+
+  for (const child of children) {
+    const nested = await getAllNestedFolderIds(child.id);
+    allIds = [...allIds, ...nested];
+  }
+
+  return allIds;
+};
+
+// Get all file IDs in this folder and its nested folders
+const getAllNestedFileIds = async (folderId) => {
+  const folderIds = [folderId, ...(await getAllNestedFolderIds(folderId))];
+  const files = await knex("files")
+    .whereIn("folder_id", folderIds)
+    .andWhere("is_deleted", false)
+    .select("id");
+
+  return files.map((f) => f.id);
+};
+
+const toggleFolderFavourite = async (userId, folderId) => {
+  // Check if folder exists
+  const folder = await knex("folders").where({ id: folderId }).first();
   if (!folder) throw new Error("Folder not found");
-  
-  const newValue = !folder.is_faviourite;
-  await knex("folders")
-    .where({ id: folderId })
-    .update({ is_faviourite: newValue, updated_at: new Date() });
-  
-  return { id: folderId, is_faviourite: newValue };
+
+  // Check if user already favourited it
+  const existing = await knex("user_favourite_folders")
+    .where({ user_id: userId, folder_id: folderId })
+    .first();
+
+  if (existing) {
+    // === UNFAVOURITE ===
+    // Get all nested folder + file IDs
+    const nestedFolders = await getAllNestedFolderIds(folderId);
+    const nestedFiles = await getAllNestedFileIds(folderId);
+
+    // Remove all from favourites
+    await knex("user_favourite_folders")
+      .whereIn("folder_id", [folderId, ...nestedFolders])
+      .andWhere("user_id", userId)
+      .del();
+
+    if (nestedFiles.length > 0) {
+      await knex("user_favourite_files")
+        .whereIn("file_id", nestedFiles)
+        .andWhere("user_id", userId)
+        .del();
+    }
+
+    return { folder_id: folderId, is_favourite: false };
+  } else {
+    // === FAVOURITE ===
+    const nestedFolders = await getAllNestedFolderIds(folderId);
+    const nestedFiles = await getAllNestedFileIds(folderId);
+
+    // Prepare batch inserts
+    const folderInserts = [
+      { user_id: userId, folder_id: folderId, created_at: new Date() },
+      ...nestedFolders.map((id) => ({
+        user_id: userId,
+        folder_id: id,
+        created_at: new Date(),
+      })),
+    ];
+
+    const fileInserts = nestedFiles.map((id) => ({
+      user_id: userId,
+      file_id: id,
+      created_at: new Date(),
+    }));
+
+    // Insert with deduplication guard
+    await knex("user_favourite_folders")
+      .insert(folderInserts)
+      .onConflict(["user_id", "folder_id"])
+      .ignore();
+
+    if (fileInserts.length > 0) {
+      await knex("user_favourite_files")
+        .insert(fileInserts)
+        .onConflict(["user_id", "file_id"])
+        .ignore();
+    }
+
+    return { folder_id: folderId, is_favourite: true };
+  }
 };
 
 const getFavouriteFolders = async (userId) => {
-  // Get all favourite folders and their nested content
+  // 1️⃣ Fetch all directly favourited folders
   const favouriteFolders = await knex("folders")
-    .where({ created_by: userId })
-    .andWhere("is_deleted", false)
-    .andWhere("is_faviourite", true)
-    .orderBy("created_at", "desc");
+    .join(
+      "user_favourite_folders",
+      "folders.id",
+      "=",
+      "user_favourite_folders.folder_id"
+    )
+    .where("user_favourite_folders.user_id", userId)
+    .andWhere("folders.is_deleted", false)
+    .select("folders.*")
+    .orderBy("user_favourite_folders.created_at", "desc");
 
-  // For each favourite folder, get all its nested folders and files
   const result = [];
-  
+  const seenFolderIds = new Set();
+
+  // 2️⃣ Build hierarchy, avoiding duplication
   for (const folder of favouriteFolders) {
-    // Get all nested folders (recursively)
-    const nestedFolders = await getNestedFolders(folder.id, userId);
-    
-    // Get all nested files
+    // Skip duplicates
+    if (seenFolderIds.has(folder.id)) continue;
+    seenFolderIds.add(folder.id);
+
+    const nestedFolders = await getNestedFolders(
+      folder.id,
+      userId,
+      seenFolderIds
+    );
     const nestedFiles = await getNestedFiles(folder.id, userId);
-    
+
     result.push({
       ...folder,
       nested_folders: nestedFolders,
-      nested_files: nestedFiles
+      nested_files: nestedFiles,
     });
   }
-  
+
   return result;
 };
 
-// Helper function to get all nested folders recursively
-const getNestedFolders = async (parentId, userId) => {
+// Recursive helper for nested folders
+const getNestedFolders = async (
+  parentId,
+  userId,
+  seenFolderIds = new Set()
+) => {
   const directChildren = await knex("folders")
-    .where({ parent_id: parentId, created_by: userId })
+    .where({ parent_id: parentId })
     .andWhere("is_deleted", false)
     .orderBy("created_at", "desc");
-  
+
   const result = [];
-  
+
   for (const child of directChildren) {
-    // Get nested folders and files for this child
-    const nestedFolders = await getNestedFolders(child.id, userId);
-    const nestedFiles = await getNestedFiles(child.id, userId);
-    
-    result.push({
-      ...child,
-      nested_folders: nestedFolders,
-      nested_files: nestedFiles
-    });
+    // Avoid duplicates globally
+    if (seenFolderIds.has(child.id)) continue;
+    seenFolderIds.add(child.id);
+
+    // Check read permission
+    const hasPermission = await knex("permissions")
+      .where({
+        user_id: userId,
+        resource_id: child.id,
+        resource_type: "folder",
+      })
+      .andWhere("can_read", true)
+      .first();
+
+    if (child.created_by === userId || hasPermission) {
+      const nestedFolders = await getNestedFolders(
+        child.id,
+        userId,
+        seenFolderIds
+      );
+      const nestedFiles = await getNestedFiles(child.id, userId);
+
+      result.push({
+        ...child,
+        nested_folders: nestedFolders,
+        nested_files: nestedFiles,
+      });
+    }
   }
-  
+
   return result;
 };
 
-// Helper function to get all nested files
+// Nested files helper (fine as-is)
 const getNestedFiles = async (folderId, userId) => {
   return knex("files")
-    .where({ folder_id: folderId, created_by: userId })
+    .where({ folder_id: folderId })
     .andWhere("is_deleted", false)
     .orderBy("created_at", "desc");
 };
 
 const getTrashFolders = async (userId, parentId = null) => {
-  console.log(`🔍 Backend getTrashFolders called - userId: ${userId}, parentId: ${parentId}`);
-  
+  console.log(
+    `🔍 Backend getTrashFolders called - userId: ${userId}, parentId: ${parentId}`
+  );
+
   if (parentId === null) {
     // Get only root-level deleted folders (folders with no parent or whose parent is not deleted)
     const folders = await knex("folders")
       .where({ created_by: userId })
       .andWhere("is_deleted", true)
-      .andWhere(function() {
-        this.whereNull("parent_id")
-          .orWhereNotExists(function() {
-            this.select("*")
-              .from("folders as parent")
-              .whereRaw("parent.id = folders.parent_id")
-              .andWhere("parent.is_deleted", true);
-          });
+      .andWhere(function () {
+        this.whereNull("parent_id").orWhereNotExists(function () {
+          this.select("*")
+            .from("folders as parent")
+            .whereRaw("parent.id = folders.parent_id")
+            .andWhere("parent.is_deleted", true);
+        });
       })
       .orderBy("created_at", "desc");
-    
-    console.log(`📁 Backend returning ${folders.length} root-level trash folders:`, folders.map(f => ({ id: f.id, name: f.name, parent_id: f.parent_id })));
+
+    console.log(
+      `📁 Backend returning ${folders.length} root-level trash folders:`,
+      folders.map((f) => ({ id: f.id, name: f.name, parent_id: f.parent_id }))
+    );
     return folders;
   } else {
     // Get folders within a specific parent folder
@@ -224,8 +346,11 @@ const getTrashFolders = async (userId, parentId = null) => {
       .where({ created_by: userId, parent_id: parentId })
       .andWhere("is_deleted", true)
       .orderBy("created_at", "desc");
-    
-    console.log(`📁 Backend returning ${folders.length} trash folders for parent ${parentId}:`, folders.map(f => ({ id: f.id, name: f.name, parent_id: f.parent_id })));
+
+    console.log(
+      `📁 Backend returning ${folders.length} trash folders for parent ${parentId}:`,
+      folders.map((f) => ({ id: f.id, name: f.name, parent_id: f.parent_id }))
+    );
     return folders;
   }
 };
@@ -298,13 +423,15 @@ const permanentDeleteFolder = async (folderId) => {
   const getFolderPath = async (folderId) => {
     const folder = await knex("folders").where({ id: folderId }).first();
     if (!folder) return null;
-    
+
     const pathParts = [folder.name];
     let currentParentId = folder.parent_id;
-    
+
     // Build path by traversing up the hierarchy
     while (currentParentId) {
-      const parentFolder = await knex("folders").where({ id: currentParentId }).first();
+      const parentFolder = await knex("folders")
+        .where({ id: currentParentId })
+        .first();
       if (parentFolder) {
         pathParts.unshift(parentFolder.name);
         currentParentId = parentFolder.parent_id;
@@ -312,7 +439,7 @@ const permanentDeleteFolder = async (folderId) => {
         break;
       }
     }
-    
+
     return path.join(__dirname, "..", "uploads", ...pathParts);
   };
 
@@ -320,9 +447,7 @@ const permanentDeleteFolder = async (folderId) => {
   const folderPath = await getFolderPath(folderId);
 
   // Delete folder record
-  await knex("folders")
-    .where({ id: folderId })
-    .del();
+  await knex("folders").where({ id: folderId }).del();
 
   // Remove physical folder directory from uploads folder
   if (folderPath && fs.existsSync(folderPath)) {
@@ -340,16 +465,16 @@ const permanentDeleteFolder = async (folderId) => {
   const cleanupAllEmptyDirectories = () => {
     try {
       const uploadsDir = path.join(__dirname, "..", "uploads");
-      
+
       if (!fs.existsSync(uploadsDir)) {
         return;
       }
-      
+
       const removeEmptyDirs = (dir) => {
         if (!fs.existsSync(dir)) return;
-        
+
         const files = fs.readdirSync(dir);
-        
+
         // Recursively process subdirectories first
         for (const file of files) {
           const filePath = path.join(dir, file);
@@ -358,7 +483,7 @@ const permanentDeleteFolder = async (folderId) => {
             removeEmptyDirs(filePath);
           }
         }
-        
+
         // Check if directory is empty after processing subdirectories
         const remainingFiles = fs.readdirSync(dir);
         if (remainingFiles.length === 0 && dir !== uploadsDir) {
@@ -366,7 +491,7 @@ const permanentDeleteFolder = async (folderId) => {
           console.log(`🗑️ Removed empty directory: ${dir}`);
         }
       };
-      
+
       removeEmptyDirs(uploadsDir);
     } catch (error) {
       console.error(`❌ Error cleaning up empty directories:`, error);

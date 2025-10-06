@@ -325,7 +325,10 @@ const downloadFile = async (req, res, next) => {
   }
 };
 
+// ✅ Fixed getFiles
 const getFiles = async (req, res, next) => {
+  console.log("into the get files");
+
   try {
     const { folder_id, context } = req.query;
     const userId = req.user.id;
@@ -334,39 +337,47 @@ const getFiles = async (req, res, next) => {
       `🔍 getFiles called - folder_id: ${folder_id}, user_id: ${userId}, context: ${context}`
     );
 
-    let userFiles;
+    let userFiles = [];
 
-    // Handle different contexts
     if (context === "favourites") {
+      // === FAVOURITES CONTEXT ===
       if (folder_id) {
-        // When inside a specific folder, get files from that folder
-        // This maintains the hierarchical structure
-        userFiles = await getUserFiles(userId, folder_id);
-      } else {
-        // When at root level, only get files that are directly marked as favourites
-        // This prevents files from favourite folders from showing up at root level
+        // Get files from this folder that the user has favourited
         userFiles = await knex("files")
+          .join(
+            "user_favourite_files",
+            "files.id",
+            "=",
+            "user_favourite_files.file_id"
+          )
+          .where("user_favourite_files.user_id", userId)
+          .andWhere("files.folder_id", folder_id)
+          .andWhere("files.is_deleted", false)
+          .select("files.*")
+          .orderBy("user_favourite_files.created_at", "desc");
+        console.log(
+          `✅ Favourited files in folder ${folder_id}: ${userFiles.length}`
+        );
+      } else {
+        // Get all favourited files (root favourites)
+        userFiles = await knex("files")
+          .join(
+            "user_favourite_files",
+            "files.id",
+            "=",
+            "user_favourite_files.file_id"
+          )
           .leftJoin("folders", "files.folder_id", "folders.id")
           .select("files.*", "folders.name as folder_name")
-          .where("files.created_by", userId)
+          .where("user_favourite_files.user_id", userId)
           .andWhere("files.is_deleted", false)
-          .andWhere("files.is_faviourite", true)
-          .orderBy("files.created_at", "desc");
+          .orderBy("user_favourite_files.created_at", "desc");
       }
     } else {
-      // Default dashboard context
+      // === DEFAULT DASHBOARD CONTEXT ===
       userFiles = await getUserFiles(userId, folder_id);
-    }
 
-    console.log(`📁 User files found: ${userFiles.length}`);
-    console.log(
-      `📁 User files:`,
-      userFiles.map((f) => ({ id: f.id, name: f.name, folder_id: f.folder_id }))
-    );
-
-    // Get files user has permission to access (only for dashboard context)
-    let permissionFiles = [];
-    if (context !== "favourites") {
+      // Include files user has permission to access
       const permissionQuery = knex("files")
         .join("permissions", function () {
           this.on("files.id", "=", "permissions.resource_id").andOn(
@@ -383,30 +394,19 @@ const getFiles = async (req, res, next) => {
         permissionQuery.where("files.folder_id", folder_id);
       }
 
-      permissionFiles = await permissionQuery.select("files.*");
-      console.log(`🔐 Permission files found: ${permissionFiles.length}`);
-      console.log(
-        `🔐 Permission files:`,
-        permissionFiles.map((f) => ({
-          id: f.id,
-          name: f.name,
-          folder_id: f.folder_id,
-        }))
-      );
-    }
+      const permissionFiles = await permissionQuery.select("files.*");
 
-    // Combine and deduplicate files
-    const allFiles = [...userFiles];
-    const existingIds = new Set(userFiles.map((f) => f.id));
-
-    for (const file of permissionFiles) {
-      if (!existingIds.has(file.id)) {
-        allFiles.push(file);
+      // Deduplicate
+      const existingIds = new Set(userFiles.map((f) => f.id));
+      for (const file of permissionFiles) {
+        if (!existingIds.has(file.id)) {
+          userFiles.push(file);
+        }
       }
     }
 
-    console.log(`✅ Total files returned: ${allFiles.length}`);
-    res.json({ files: allFiles });
+    console.log(`✅ Total files returned: ${userFiles.length}`);
+    res.json({ files: userFiles });
   } catch (err) {
     console.error("Error in getFiles:", err);
     next(err);
