@@ -23,7 +23,14 @@ router.post("/register", authMiddleware, async (req, res, next) => {
     if (existingUser) {
       return res.status(400).json({ error: "Username already exists" });
     }
-
+    const passwordRegex =
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{8,}$/;
+    if (!passwordRegex.test(password)) {
+      return res.status(400).json({
+        error:
+          "Password must contain at least one uppercase letter, one lowercase letter, one special character, and be at least 8 characters long.",
+      });
+    }
     const password_hash = await bcrypt.hash(password, 10);
 
     const [userId] = await db("users").insert({
@@ -84,6 +91,18 @@ router.put("/users/:id", authMiddleware, async (req, res, next) => {
 
       if (usernameExists) {
         return res.status(400).json({ error: "Username already exists" });
+      }
+    }
+
+    // Password validation if provided
+    if (password) {
+      const passwordRegex =
+        /^(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{8,}$/;
+      if (!passwordRegex.test(password)) {
+        return res.status(400).json({
+          error:
+            "Password must contain at least one uppercase letter, one lowercase letter, one special character, and be at least 8 characters long.",
+        });
       }
     }
 

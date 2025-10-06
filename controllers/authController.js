@@ -13,11 +13,12 @@ const login = async (req, res, next) => {
 
     const token = jwt.sign(
       { userId: user.id, role: user.role },
-      process.env.JWT_SECRET,
+      process.env.JWT_SECRET
     );
 
     res.json({ token, user: { id: user.id, username, role: user.role } });
   } catch (err) {
+    console.log(err);
     next(err);
   }
 };
