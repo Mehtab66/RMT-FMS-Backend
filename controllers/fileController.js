@@ -338,24 +338,20 @@ const getFiles = async (req, res, next) => {
 
     // Handle different contexts
     if (context === "favourites") {
-      // Get files from favourite folders that match the folder_id
-      const favouriteFiles = await getFavouriteFiles(userId);
-      userFiles = [];
-
-      // Find files that match the folder_id in the favourite structure
-      const findFilesInFavourites = (files, targetFolderId) => {
-        for (const file of files) {
-          if (file.folder_id == targetFolderId) {
-            userFiles.push(file);
-          }
-        }
-      };
-
       if (folder_id) {
-        findFilesInFavourites(favouriteFiles, folder_id);
+        // When inside a specific folder, get files from that folder
+        // This maintains the hierarchical structure
+        userFiles = await getUserFiles(userId, folder_id);
       } else {
-        // If no folder_id, return all favourite files
-        userFiles = favouriteFiles;
+        // When at root level, only get files that are directly marked as favourites
+        // This prevents files from favourite folders from showing up at root level
+        userFiles = await knex("files")
+          .leftJoin("folders", "files.folder_id", "folders.id")
+          .select("files.*", "folders.name as folder_name")
+          .where("files.created_by", userId)
+          .andWhere("files.is_deleted", false)
+          .andWhere("files.is_faviourite", true)
+          .orderBy("files.created_at", "desc");
       }
     } else {
       // Default dashboard context
