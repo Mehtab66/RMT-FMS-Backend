@@ -83,10 +83,22 @@ const getFolder = async (id) => {
 };
 
 const getUserFolders = async (userId) => {
-  return knex("folders")
+  const result = await knex("folders")
+    .leftJoin("user_favourite_folders", function() {
+      this.on("folders.id", "=", "user_favourite_folders.folder_id")
+          .andOn("user_favourite_folders.user_id", "=", userId);
+    })
+    .select("folders.*", knex.raw("CASE WHEN user_favourite_folders.folder_id IS NOT NULL THEN true ELSE false END as favourited"))
     .where({ created_by: userId })
     .andWhere("is_deleted", false)
     .orderBy("created_at", "desc");
+  
+  console.log("🔍 [getUserFolders] Result for user:", userId, "folders:", result.length);
+  if (result.length > 0) {
+    console.log("🔍 [getUserFolders] First folder favourited:", result[0].favourited);
+  }
+  
+  return result;
 };
 
 const updateFolder = async (folderId, updates) => {
@@ -153,6 +165,8 @@ const getAllNestedFileIds = async (folderId) => {
 };
 
 const toggleFolderFavourite = async (userId, folderId) => {
+  console.log("🔄 [toggleFolderFavourite] Starting toggle for folder:", folderId, "user:", userId);
+  
   // Check if folder exists
   const folder = await knex("folders").where({ id: folderId }).first();
   if (!folder) throw new Error("Folder not found");
@@ -162,63 +176,30 @@ const toggleFolderFavourite = async (userId, folderId) => {
     .where({ user_id: userId, folder_id: folderId })
     .first();
 
-  if (existing) {
-    // === UNFAVOURITE ===
-    // Get all nested folder + file IDs
-    const nestedFolders = await getAllNestedFolderIds(folderId);
-    const nestedFiles = await getAllNestedFileIds(folderId);
+  console.log("🔍 [toggleFolderFavourite] Existing record:", existing);
 
-    // Remove all from favourites
+  if (existing) {
+    // UNFAVOURITE - Delete from table
     await knex("user_favourite_folders")
-      .whereIn("folder_id", [folderId, ...nestedFolders])
-      .andWhere("user_id", userId)
+      .where({ user_id: userId, folder_id: folderId })
       .del();
 
-    if (nestedFiles.length > 0) {
-      await knex("user_favourite_files")
-        .whereIn("file_id", nestedFiles)
-        .andWhere("user_id", userId)
-        .del();
-    }
-
-    return { folder_id: folderId, is_favourite: false };
+    console.log("❌ [toggleFolderFavourite] Unfavourited folder:", folderId);
+    return { id: folderId, favourited: false };
   } else {
-    // === FAVOURITE ===
-    const nestedFolders = await getAllNestedFolderIds(folderId);
-    const nestedFiles = await getAllNestedFileIds(folderId);
-
-    // Prepare batch inserts
-    const folderInserts = [
-      { user_id: userId, folder_id: folderId, created_at: new Date() },
-      ...nestedFolders.map((id) => ({
-        user_id: userId,
-        folder_id: id,
-        created_at: new Date(),
-      })),
-    ];
-
-    const fileInserts = nestedFiles.map((id) => ({
-      user_id: userId,
-      file_id: id,
-      created_at: new Date(),
-    }));
-
-    // Insert with deduplication guard
+    // FAVOURITE - Insert into table
     await knex("user_favourite_folders")
-      .insert(folderInserts)
-      .onConflict(["user_id", "folder_id"])
-      .ignore();
+      .insert({ 
+        user_id: userId, 
+        folder_id: folderId, 
+        created_at: new Date() 
+      });
 
-    if (fileInserts.length > 0) {
-      await knex("user_favourite_files")
-        .insert(fileInserts)
-        .onConflict(["user_id", "file_id"])
-        .ignore();
-    }
-
-    return { folder_id: folderId, is_favourite: true };
+    console.log("✅ [toggleFolderFavourite] Favourited folder:", folderId);
+    return { id: folderId, favourited: true };
   }
 };
+
 
 const getFavouriteFolders = async (userId) => {
   // 1️⃣ Fetch all directly favourited folders
@@ -231,7 +212,7 @@ const getFavouriteFolders = async (userId) => {
     )
     .where("user_favourite_folders.user_id", userId)
     .andWhere("folders.is_deleted", false)
-    .select("folders.*")
+    .select("folders.*", knex.raw("true as favourited"))
     .orderBy("user_favourite_folders.created_at", "desc");
 
   const result = [];
@@ -308,11 +289,66 @@ const getNestedFolders = async (
 };
 
 // Nested files helper (fine as-is)
+// const getNestedFiles = async (folderId, userId) => {
+//   return knex("files")
+//     .where({ folder_id: folderId })
+//     .andWhere("is_deleted", false)
+//     .orderBy("created_at", "desc");
+// };
+
+// Recursive helper for nested folders
+// const getNestedFolders = async (
+//   parentId,
+//   userId,
+//   seenFolderIds = new Set()
+// ) => {
+//   const directChildren = await knex("folders")
+//     .where({ parent_id: parentId })
+//     .andWhere("is_deleted", false)
+//     .orderBy("created_at", "desc");
+
+//   const result = [];
+
+//   for (const child of directChildren) {
+//     // Avoid duplicates globally
+//     if (seenFolderIds.has(child.id)) continue;
+//     seenFolderIds.add(child.id);
+
+//     // Check read permission
+//     const hasPermission = await knex("permissions")
+//       .where({
+//         user_id: userId,
+//         resource_id: child.id,
+//         resource_type: "folder",
+//       })
+//       .andWhere("can_read", true)
+//       .first();
+
+//     if (child.created_by === userId || hasPermission) {
+//       const nestedFolders = await getNestedFolders(
+//         child.id,
+//         userId,
+//         seenFolderIds
+//       );
+//       const nestedFiles = await getNestedFiles(child.id, userId);
+
+//       result.push({
+//         ...child,
+//         nested_folders: nestedFolders,
+//         nested_files: nestedFiles,
+//       });
+//     }
+//   }
+
+//   return result;
+// };
+
+// Nested files helper (fine as-is)
 const getNestedFiles = async (folderId, userId) => {
   return knex("files")
     .where({ folder_id: folderId })
     .andWhere("is_deleted", false)
-    .orderBy("created_at", "desc");
+    .orderBy("created_at", "desc");
 };
 
 const getTrashFolders = async (userId, parentId = null) => {

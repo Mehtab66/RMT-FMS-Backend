@@ -341,13 +341,18 @@ const toggleFolderFavouriteController = async (req, res, next) => {
     const folderId = parseInt(req.params.id);
     const userId = req.user.id;
 
+    console.log("🎯 [toggleFolderFavouriteController] Calling service for folder:", folderId, "user:", userId);
     const result = await toggleFolderFavourite(userId, folderId);
+    console.log("🎯 [toggleFolderFavouriteController] Service returned:", result);
+    console.log("🎯 [toggleFolderFavouriteController] Sending response:", result);
     res.json(result);
   } catch (err) {
     console.error("Error in toggleFolderFavouriteController:", err);
     next(err);
   }
 };
+
+// router.get("/favourites", authMiddleware, getFavouriteFoldersController);
 
 const getFavouriteFoldersController = async (req, res, next) => {
   try {
@@ -357,7 +362,7 @@ const getFavouriteFoldersController = async (req, res, next) => {
   } catch (err) {
     console.error("Error in getFavouriteFoldersController:", err);
     next(err);
-  }
+  }
 };
 
 const getTrashFoldersController = async (req, res, next) => {

@@ -295,19 +295,53 @@ const uploadFolderWithFiles = async (req, res) => {
 const downloadFile = async (req, res, next) => {
   try {
     const fileId = parseInt(req.params.id);
+    const userId = req.user.id;
+    const userRole = req.user.role;
+    
+    console.log(`📥 [downloadFile] Download request - File ID: ${fileId}, User ID: ${userId}, Role: ${userRole}`);
+    
     req.resourceType = "file";
     req.resourceId = fileId;
     req.action = "download";
 
     const file = await getFileById(fileId);
+    console.log(`📥 [downloadFile] File from DB:`, file ? {
+      id: file.id,
+      name: file.name,
+      created_by: file.created_by,
+      file_path: file.file_path,
+      is_deleted: file.is_deleted
+    } : 'NOT FOUND');
+    
     if (!file) {
+      console.log(`❌ [downloadFile] File not found in database - ID: ${fileId}`);
       return res.status(404).json({ error: "File not found" });
     }
 
+    // Check if file is deleted
+    if (file.is_deleted) {
+      console.log(`❌ [downloadFile] File is deleted - ID: ${fileId}`);
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    // Check if user owns the file or is super admin
+    if (file.created_by !== userId && userRole !== "super_admin") {
+      console.log(`❌ [downloadFile] User ${userId} does not own file ${fileId} (owner: ${file.created_by})`);
+      return res.status(403).json({ error: "Permission denied" });
+    }
+
     // Check if file exists in local storage
-    if (!file.file_path || !require("fs").existsSync(file.file_path)) {
+    if (!file.file_path) {
+      console.log(`❌ [downloadFile] File path is null - ID: ${fileId}`);
+      return res.status(404).json({ error: "File path not found" });
+    }
+    
+    if (!require("fs").existsSync(file.file_path)) {
+      console.log(`❌ [downloadFile] File does not exist on server - Path: ${file.file_path}`);
       return res.status(404).json({ error: "File not found on server" });
     }
+
+    console.log(`✅ [downloadFile] File found, streaming - Path: ${file.file_path}`);
 
     // Set appropriate headers for download
     res.setHeader("Content-Type", file.mime_type || "application/octet-stream");
@@ -320,7 +354,7 @@ const downloadFile = async (req, res, next) => {
     const fileStream = require("fs").createReadStream(file.file_path);
     fileStream.pipe(res);
   } catch (err) {
-    console.error("Error in downloadFile:", err);
+    console.error("❌ [downloadFile] Error:", err);
     next(err);
   }
 };
@@ -449,12 +483,16 @@ const deleteFileById = async (req, res, next) => {
 const toggleFileFavouriteController = async (req, res, next) => {
   try {
     const fileId = parseInt(req.params.id);
+    const userId = req.user.id;
 
     req.resourceType = "file";
     req.resourceId = fileId;
     req.action = "edit";
 
-    const result = await toggleFileFavourite(fileId);
+    console.log("🎯 [toggleFileFavouriteController] Calling service for file:", fileId, "user:", userId);
+    const result = await toggleFileFavourite(fileId, userId);
+    console.log("🎯 [toggleFileFavouriteController] Service returned:", result);
+    console.log("🎯 [toggleFileFavouriteController] Sending response:", result);
     res.json(result);
   } catch (err) {
     console.error("Error in toggleFileFavouriteController:", err);
