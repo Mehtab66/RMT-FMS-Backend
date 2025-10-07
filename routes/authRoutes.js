@@ -7,13 +7,13 @@ const authController = require("../controllers/authController");
 const router = express.Router();
 router.post("/login", authController.login);
 // Create user
-router.post("/register", authMiddleware, async (req, res, next) => {
+router.post("/register", async (req, res, next) => {
   try {
-    if (req.user.role !== "super_admin") {
-      return res
-        .status(403)
-        .json({ error: "Only super admin can create users" });
-    }
+    // if (req.user.role !== "super_admin") {
+    //   return res
+    //     .status(403)
+    //     .json({ error: "Only super admin can create users" });
+    // }
 
     const { username, password, role } = req.body;
 
