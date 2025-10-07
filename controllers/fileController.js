@@ -331,7 +331,7 @@ const downloadFile = async (req, res, next) => {
     res.setHeader("Content-Type", file.mime_type || "application/octet-stream");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${file.original_name || file.name}"`
+      `attachment; filename="${ file.name}"`
     );
 
     // Stream the file
