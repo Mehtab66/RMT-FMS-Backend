@@ -14,9 +14,12 @@ const checkPermission = async (req, res, next) => {
 
   // Allow download if user has download permission
   if (action === "download") {
+    console.log(`🔐 [Permission] Checking download permission for ${resourceType} ${resourceId}`);
+    
     // Check if user owns the resource
     if (resourceType === "folder" && resourceId) {
       const folder = await knex("folders").where({ id: resourceId }).first();
+      console.log(`🔐 [Permission] Folder from DB:`, folder ? { id: folder.id, created_by: folder.created_by } : 'NOT FOUND');
       if (folder && folder.created_by === req.user.id) {
         console.log(`✅ User owns folder, download allowed`);
         return next();
@@ -25,6 +28,7 @@ const checkPermission = async (req, res, next) => {
     
     if (resourceType === "file" && resourceId) {
       const file = await knex("files").where({ id: resourceId }).first();
+      console.log(`🔐 [Permission] File from DB:`, file ? { id: file.id, created_by: file.created_by, is_deleted: file.is_deleted } : 'NOT FOUND');
       if (file && file.created_by === req.user.id) {
         console.log(`✅ User owns file, download allowed`);
         return next();

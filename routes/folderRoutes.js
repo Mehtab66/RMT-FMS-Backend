@@ -33,11 +33,20 @@ router.get("/root", authMiddleware, async (req, res, next) => {
     
     // Get root folders created by user
     const userFolders = await db("folders")
-      .whereNull("parent_id")
-      .where("created_by", userId)
-      .andWhere("is_deleted", false)
-      .select("*")
-      .orderBy("created_at", "desc");
+      .leftJoin("user_favourite_folders", function() {
+        this.on("folders.id", "=", "user_favourite_folders.folder_id")
+            .andOn("user_favourite_folders.user_id", "=", userId);
+      })
+      .whereNull("folders.parent_id")
+      .where("folders.created_by", userId)
+      .andWhere("folders.is_deleted", false)
+      .select("folders.*", db.raw("CASE WHEN user_favourite_folders.folder_id IS NOT NULL THEN true ELSE false END as favourited"))
+      .orderBy("folders.created_at", "desc");
+    
+    console.log("🔍 [folderRoutes] User folders with favourited:", userFolders.length);
+    if (userFolders.length > 0) {
+      console.log("🔍 [folderRoutes] First user folder favourited:", userFolders[0].favourited);
+    }
     
     // Get root folders user has permission to access
     const permissionFolders = await db("folders")
@@ -45,11 +54,15 @@ router.get("/root", authMiddleware, async (req, res, next) => {
         this.on("folders.id", "=", "permissions.resource_id")
           .andOn("permissions.resource_type", "=", db.raw("'folder'"));
       })
+      .leftJoin("user_favourite_folders", function() {
+        this.on("folders.id", "=", "user_favourite_folders.folder_id")
+            .andOn("user_favourite_folders.user_id", "=", userId);
+      })
       .whereNull("folders.parent_id")
       .where("permissions.user_id", userId)
       .where("permissions.can_read", true)
       .andWhere("folders.is_deleted", false)
-      .select("folders.*")
+      .select("folders.*", db.raw("CASE WHEN user_favourite_folders.folder_id IS NOT NULL THEN true ELSE false END as favourited"))
       .orderBy("folders.created_at", "desc");
     
     // Combine and deduplicate folders
@@ -63,6 +76,7 @@ router.get("/root", authMiddleware, async (req, res, next) => {
     }
 
     console.log(`Found ${allFolders.length} root folders`);
+    console.log("🔍 [folderRoutes] Final response folders:", allFolders.map(f => ({ id: f.id, name: f.name, favourited: f.favourited })));
     res.json({ folders: allFolders });
   } catch (err) {
     console.log("error in getting root folders", err);

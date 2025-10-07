@@ -243,7 +243,11 @@ const getFile = async (fileId) => {
 const getUserFiles = async (userId, folder_id = null) => {
   let query = knex("files")
     .leftJoin("folders", "files.folder_id", "folders.id")
-    .select("files.*", "folders.name as folder_name")
+    .leftJoin("user_favourite_files", function() {
+      this.on("files.id", "=", "user_favourite_files.file_id")
+          .andOn("user_favourite_files.user_id", "=", userId);
+    })
+    .select("files.*", "folders.name as folder_name", knex.raw("CASE WHEN user_favourite_files.file_id IS NOT NULL THEN true ELSE false END as favourited"))
     .where("files.created_by", userId)
     .andWhere("files.is_deleted", false);
 
@@ -251,7 +255,14 @@ const getUserFiles = async (userId, folder_id = null) => {
     query = query.where("files.folder_id", folder_id);
   }
 
-  return query.orderBy("files.created_at", "desc");
+  const result = await query.orderBy("files.created_at", "desc");
+  
+  console.log("🔍 [getUserFiles] Result for user:", userId, "folder:", folder_id, "files:", result.length);
+  if (result.length > 0) {
+    console.log("🔍 [getUserFiles] First file favourited:", result[0].favourited);
+  }
+  
+  return result;
 };
 
 const updateFile = async (fileId, updates) => {

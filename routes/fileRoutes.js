@@ -206,11 +206,20 @@ router.get("/root", authMiddleware, async (req, res, next) => {
 
     // Get root files created by user
     const userFiles = await db("files")
-      .whereNull("folder_id")
-      .where("created_by", userId)
-      .andWhere("is_deleted", false)
-      .select("*")
-      .orderBy("created_at", "desc");
+      .leftJoin("user_favourite_files", function() {
+        this.on("files.id", "=", "user_favourite_files.file_id")
+            .andOn("user_favourite_files.user_id", "=", userId);
+      })
+      .whereNull("files.folder_id")
+      .where("files.created_by", userId)
+      .andWhere("files.is_deleted", false)
+      .select("files.*", db.raw("CASE WHEN user_favourite_files.file_id IS NOT NULL THEN true ELSE false END as favourited"))
+      .orderBy("files.created_at", "desc");
+    
+    console.log("🔍 [fileRoutes] User files with favourited:", userFiles.length);
+    if (userFiles.length > 0) {
+      console.log("🔍 [fileRoutes] First user file favourited:", userFiles[0].favourited);
+    }
 
     // Get root files user has permission to access
     const permissionFiles = await db("files")
@@ -221,11 +230,15 @@ router.get("/root", authMiddleware, async (req, res, next) => {
           db.raw("'file'")
         );
       })
+      .leftJoin("user_favourite_files", function() {
+        this.on("files.id", "=", "user_favourite_files.file_id")
+            .andOn("user_favourite_files.user_id", "=", userId);
+      })
       .whereNull("files.folder_id")
       .where("permissions.user_id", userId)
       .where("permissions.can_read", true)
       .andWhere("files.is_deleted", false)
-      .select("files.*")
+      .select("files.*", db.raw("CASE WHEN user_favourite_files.file_id IS NOT NULL THEN true ELSE false END as favourited"))
       .orderBy("files.created_at", "desc");
 
     // Combine and deduplicate files
@@ -238,6 +251,7 @@ router.get("/root", authMiddleware, async (req, res, next) => {
       }
     }
 
+    console.log("🔍 [fileRoutes] Final response files:", allFiles.map(f => ({ id: f.id, name: f.name, favourited: f.favourited })));
     res.json({ files: allFiles });
   } catch (err) {
     next(err);
