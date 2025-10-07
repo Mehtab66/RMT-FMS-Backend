@@ -309,10 +309,10 @@ const downloadFile = async (req, res, next) => {
     }
 
     // Check if user owns the file or is super admin
-    if (file.created_by !== userId && userRole !== "super_admin") {
-      console.log(`❌ [downloadFile] User ${userId} does not own file ${fileId} (owner: ${file.created_by})`);
-      return res.status(403).json({ error: "Permission denied" });
-    }
+    // if (file.created_by !== userId && userRole !== "super_admin") {
+    //   console.log(`❌ [downloadFile] User ${userId} does not own file ${fileId} (owner: ${file.created_by})`);
+    //   return res.status(403).json({ error: "Permission denied" });
+    // }
 
     // Check if file exists in local storage
     if (!file.file_path) {

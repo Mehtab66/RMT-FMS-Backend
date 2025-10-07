@@ -84,50 +84,55 @@ const setUploadResourceInfo = (req, res, next) => {
 // Folder upload - same endpoint but different handling
 // Folder upload - Add Multer middleware to process the files with logging
 router.post(
-  "/upload-folder", 
+  "/upload-folder",
   authMiddleware,
   // Add detailed logging middleware
   (req, res, next) => {
     console.log("🔍 [Multer Debug] Starting upload-folder request");
     console.log("🔍 [Multer Debug] Headers:", {
-      'content-type': req.headers['content-type'],
-      'content-length': req.headers['content-length'],
-      'authorization': req.headers['authorization'] ? 'present' : 'missing'
+      "content-type": req.headers["content-type"],
+      "content-length": req.headers["content-length"],
+      authorization: req.headers["authorization"] ? "present" : "missing",
     });
     console.log("🔍 [Multer Debug] Body fields:", Object.keys(req.body));
     console.log("🔍 [Multer Debug] Query params:", req.query);
     next();
   },
-  
+
   // Multer middleware with error handling
   (req, res, next) => {
-    upload.array("files", 200)(req, res, function(err) {
+    upload.array("files", 200)(req, res, function (err) {
       if (err) {
         console.error("❌ [Multer Error]", err);
         console.error("❌ [Multer Error] Details:", {
           code: err.code,
           field: err.field,
-          message: err.message
+          message: err.message,
         });
         return res.status(400).json({
           message: "File upload failed",
-          error: err.message
+          error: err.message,
         });
       }
       console.log("✅ [Multer Success] Files processed:", {
         fileCount: req.files ? req.files.length : 0,
-        files: req.files ? req.files.map(f => ({
-          originalname: f.originalname,
-          size: f.size,
-          mimetype: f.mimetype,
-          filename: f.filename
-        })) : 'no files'
+        files: req.files
+          ? req.files.map((f) => ({
+              originalname: f.originalname,
+              size: f.size,
+              mimetype: f.mimetype,
+              filename: f.filename,
+            }))
+          : "no files",
       });
-      console.log("✅ [Multer Success] Body after Multer:", Object.keys(req.body));
+      console.log(
+        "✅ [Multer Success] Body after Multer:",
+        Object.keys(req.body)
+      );
       next();
     });
   },
-  
+
   uploadFolderWithFiles
 );
 
@@ -154,13 +159,7 @@ const setFileResourceInfo = (req, res, next) => {
 };
 
 // Other routes remain the same...
-router.get(
-  "/download/:id",
-  authMiddleware,
-  setFileResourceInfo,
-  checkPermission,
-  downloadFile
-);
+router.get("/download/:id", authMiddleware, setFileResourceInfo, downloadFile);
 router.get("/", authMiddleware, getFiles);
 router.put(
   "/:id",
@@ -206,19 +205,33 @@ router.get("/root", authMiddleware, async (req, res, next) => {
 
     // Get root files created by user
     const userFiles = await db("files")
-      .leftJoin("user_favourite_files", function() {
-        this.on("files.id", "=", "user_favourite_files.file_id")
-            .andOn("user_favourite_files.user_id", "=", userId);
+      .leftJoin("user_favourite_files", function () {
+        this.on("files.id", "=", "user_favourite_files.file_id").andOn(
+          "user_favourite_files.user_id",
+          "=",
+          userId
+        );
       })
       .whereNull("files.folder_id")
       .where("files.created_by", userId)
       .andWhere("files.is_deleted", false)
-      .select("files.*", db.raw("CASE WHEN user_favourite_files.file_id IS NOT NULL THEN true ELSE false END as favourited"))
+      .select(
+        "files.*",
+        db.raw(
+          "CASE WHEN user_favourite_files.file_id IS NOT NULL THEN true ELSE false END as favourited"
+        )
+      )
       .orderBy("files.created_at", "desc");
-    
-    console.log("🔍 [fileRoutes] User files with favourited:", userFiles.length);
+
+    console.log(
+      "🔍 [fileRoutes] User files with favourited:",
+      userFiles.length
+    );
     if (userFiles.length > 0) {
-      console.log("🔍 [fileRoutes] First user file favourited:", userFiles[0].favourited);
+      console.log(
+        "🔍 [fileRoutes] First user file favourited:",
+        userFiles[0].favourited
+      );
     }
 
     // Get root files user has permission to access
@@ -230,15 +243,23 @@ router.get("/root", authMiddleware, async (req, res, next) => {
           db.raw("'file'")
         );
       })
-      .leftJoin("user_favourite_files", function() {
-        this.on("files.id", "=", "user_favourite_files.file_id")
-            .andOn("user_favourite_files.user_id", "=", userId);
+      .leftJoin("user_favourite_files", function () {
+        this.on("files.id", "=", "user_favourite_files.file_id").andOn(
+          "user_favourite_files.user_id",
+          "=",
+          userId
+        );
       })
       .whereNull("files.folder_id")
       .where("permissions.user_id", userId)
       .where("permissions.can_read", true)
       .andWhere("files.is_deleted", false)
-      .select("files.*", db.raw("CASE WHEN user_favourite_files.file_id IS NOT NULL THEN true ELSE false END as favourited"))
+      .select(
+        "files.*",
+        db.raw(
+          "CASE WHEN user_favourite_files.file_id IS NOT NULL THEN true ELSE false END as favourited"
+        )
+      )
       .orderBy("files.created_at", "desc");
 
     // Combine and deduplicate files
@@ -251,7 +272,14 @@ router.get("/root", authMiddleware, async (req, res, next) => {
       }
     }
 
-    console.log("🔍 [fileRoutes] Final response files:", allFiles.map(f => ({ id: f.id, name: f.name, favourited: f.favourited })));
+    console.log(
+      "🔍 [fileRoutes] Final response files:",
+      allFiles.map((f) => ({
+        id: f.id,
+        name: f.name,
+        favourited: f.favourited,
+      }))
+    );
     res.json({ files: allFiles });
   } catch (err) {
     next(err);
