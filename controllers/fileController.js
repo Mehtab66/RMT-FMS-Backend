@@ -135,6 +135,8 @@ const uploadFolderWithFiles = async (req, res) => {
     // Convert paths to array if it's a string
     const pathsArray = Array.isArray(paths) ? paths : [paths];
 
+    const uploadedFiles = []; // Array to collect uploaded file info
+
     // 🟢 Step 1: Create ALL folder structures in DB and filesystem
     console.log("🟢 [Upload Folder] Creating complete folder structure...");
 
@@ -211,22 +213,25 @@ const uploadFolderWithFiles = async (req, res) => {
         // Move file from temp to final location
         fs.renameSync(file.path, finalPath);
 
-        // Save file metadata to DB
-        await knex("files").insert({
-          name: fileName,
-          folder_id: folderId,
-          file_path: finalPath,
-          file_url: `/uploads/${path.join(...folderParts, fileName)}`,
-          created_by: userId,
-          created_at: new Date(),
-          updated_at: new Date(),
-          mime_type: file.mimetype,
-          size: file.size,
-          original_name: file.originalname,
-          is_faviourite: false,
-          is_deleted: false,
-        });
+        // Save file metadata to DB and get the inserted file
+        const [insertedFile] = await knex("files")
+          .insert({
+            name: fileName,
+            folder_id: folderId,
+            file_path: finalPath,
+            file_url: `/uploads/${path.join(...folderParts, fileName)}`,
+            created_by: userId,
+            created_at: new Date(),
+            updated_at: new Date(),
+            mime_type: file.mimetype,
+            size: file.size,
+            original_name: file.originalname,
+            is_faviourite: false,
+            is_deleted: false,
+          })
+          .returning("*");
 
+        uploadedFiles.push(insertedFile);
         console.log(`✅ [Upload Folder] Saved file: ${finalPath}`);
       }
     } else {
@@ -235,40 +240,19 @@ const uploadFolderWithFiles = async (req, res) => {
       );
     }
 
-    // 🟢 Step 3: Verify and report what was created
+    // 🟢 Step 3: Return the expected response structure
     console.log("🔍 [Upload Folder] Upload completed. Summary:");
     console.log(`   - Folders created in DB: ${allPaths.length}`);
-    console.log(`   - Files processed: ${files ? files.length : 0}`);
+    console.log(`   - Files processed: ${uploadedFiles.length}`);
 
-    // Verify empty folders were created
-    if (allPaths.length > 0) {
-      console.log("🔍 [Upload Folder] Checking empty folders:");
-      for (const folderPath of allPaths) {
-        const localDir = path.join(
-          "uploads",
-          ...folderPath.split("/").filter(Boolean)
-        );
-        const isEmpty =
-          fs.existsSync(localDir) && fs.readdirSync(localDir).length === 0;
-        console.log(
-          `   - ${folderPath}: ${isEmpty ? "✅ EMPTY" : "has files"}`
-        );
-      }
-    }
-
+    // Return the structure that frontend expects
     res.status(200).json({
+      files: uploadedFiles, // This is what the frontend expects
       message: `✅ ${
         uploadType === "folder" ? "Folder" : "Files"
       } uploaded successfully!`,
-      fileCount: files?.length || 0,
+      fileCount: uploadedFiles.length,
       folderCount: allPaths.length,
-      emptyFolders: allPaths.filter((folderPath) => {
-        const localDir = path.join(
-          "uploads",
-          ...folderPath.split("/").filter(Boolean)
-        );
-        return fs.existsSync(localDir) && fs.readdirSync(localDir).length === 0;
-      }).length,
     });
   } catch (err) {
     console.error("❌ [Upload Folder] Error:", err);
