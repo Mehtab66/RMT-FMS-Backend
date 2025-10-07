@@ -148,16 +148,77 @@ const getFolders = async (req, res, next) => {
 
 const updateFolderDetails = async (req, res, next) => {
   try {
+    console.log("Update folder request received:", {
+      params: req.params,
+      body: req.body,
+      user: req.user, // if you have user info
+    });
+
     const folderId = parseInt(req.params.id);
     const { name } = req.body;
+
+    // Validate folder ID
+    if (isNaN(folderId) || folderId <= 0) {
+      return res.status(400).json({
+        error: "Invalid folder ID",
+        receivedId: req.params.id,
+      });
+    }
+
+    // Validate name
+    if (!name || typeof name !== "string" || name.trim().length === 0) {
+      return res.status(400).json({
+        error: "Folder name is required and must be a non-empty string",
+      });
+    }
+
+    const trimmedName = name.trim();
+
+    // Check if folder exists first
+    const existingFolder = await knex("folders")
+      .where({ id: folderId })
+      .first();
+
+    if (!existingFolder) {
+      return res.status(404).json({
+        error: "Folder not found",
+        folderId,
+      });
+    }
+
+    // Check for duplicate names (if folder names should be unique)
+    const duplicateFolder = await knex("folders")
+      .where({ name: trimmedName })
+      .whereNot({ id: folderId })
+      .first();
+
+    if (duplicateFolder) {
+      return res.status(409).json({
+        error: "A folder with this name already exists",
+      });
+    }
 
     req.resourceType = "folder";
     req.resourceId = folderId;
     req.action = "edit";
 
-    const updatedFolder = await updateFolder(folderId, { name });
+    console.log("Attempting to update folder:", {
+      folderId,
+      name: trimmedName,
+    });
+
+    const updatedFolder = await updateFolder(folderId, { name: trimmedName });
+
+    console.log("Folder updated successfully:", updatedFolder);
+
     res.json(updatedFolder);
   } catch (err) {
+    console.error("Error in updateFolderDetails:", {
+      message: err.message,
+      stack: err.stack,
+      body: req.body,
+      params: req.params,
+    });
     next(err);
   }
 };

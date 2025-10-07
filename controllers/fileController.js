@@ -449,18 +449,16 @@ const deleteFileById = async (req, res, next) => {
 const toggleFileFavouriteController = async (req, res, next) => {
   try {
     const fileId = parseInt(req.params.id);
+    const userId = req.user.id; // ensure your authMiddleware sets req.user
 
-    req.resourceType = "file";
-    req.resourceId = fileId;
-    req.action = "edit";
-
-    const result = await toggleFileFavourite(fileId);
+    const result = await toggleFileFavourite(fileId, userId);
     res.json(result);
   } catch (err) {
     console.error("Error in toggleFileFavouriteController:", err);
     next(err);
   }
 };
+
 
 const getFavouriteFilesController = async (req, res, next) => {
   try {

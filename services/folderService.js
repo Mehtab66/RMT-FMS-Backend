@@ -90,14 +90,50 @@ const getUserFolders = async (userId) => {
 };
 
 const updateFolder = async (folderId, updates) => {
-  const [updatedFolder] = await knex("folders")
-    .where({ id: folderId })
-    .update({
-      ...updates,
-      updated_at: new Date(),
-    })
-    .returning("*");
-  return updatedFolder;
+  try {
+    console.log("Database update operation:", { folderId, updates });
+
+    // First, check if the folder exists
+    const existingFolder = await knex("folders")
+      .where({ id: folderId })
+      .first();
+
+    if (!existingFolder) {
+      throw new Error(`Folder with ID ${folderId} not found`);
+    }
+
+    // Perform the update
+    const updateResult = await knex("folders")
+      .where({ id: folderId })
+      .update({
+        ...updates,
+        updated_at: new Date(),
+      });
+
+    console.log("Update result:", updateResult); // Should be 1 if successful, 0 if failed
+
+    if (updateResult === 0) {
+      throw new Error(
+        "No rows were updated - folder may not exist or data is unchanged"
+      );
+    }
+
+    // Fetch the updated folder separately
+    const updatedFolder = await knex("folders").where({ id: folderId }).first();
+
+    if (!updatedFolder) {
+      throw new Error("Failed to fetch updated folder data");
+    }
+
+    return updatedFolder;
+  } catch (err) {
+    console.error("Database update error:", {
+      message: err.message,
+      folderId,
+      updates,
+    });
+    throw err;
+  }
 };
 
 const deleteFolder = async (folderId) => {
