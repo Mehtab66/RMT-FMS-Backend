@@ -1,6 +1,8 @@
 // routes/fileRoutes.js - Remove express-fileupload and use only Multer
 const express = require("express");
 const multer = require("multer");
+const jwt = require("jsonwebtoken");
+
 const {
   uploadFiles,
   uploadFolderWithFiles,
@@ -56,7 +58,6 @@ const uploadMultiple = multer({
     parts: 1000, // allow more total parts (fields + files)
   },
 });
-
 
 // Multer configuration that preserves folder structure
 const upload = multer({
@@ -149,8 +150,49 @@ const setFileResourceInfo = (req, res, next) => {
 
 // Other routes remain the same...
 router.get("/download/:id", authMiddleware, setFileResourceInfo, downloadFile);
-router.get("/open/:id", authMiddleware, openFile);
+router.get("/open/:id/url", authMiddleware, async (req, res) => {
+  const fileId = parseInt(req.params.id);
+  const userId = req.user.id;
 
+  const file = await db("files").where({ id: fileId }).first();
+  if (!file) return res.status(404).json({ error: "File not found" });
+
+  // Generate short-lived signed token (valid 1 minute)
+  const tempToken = jwt.sign({ fileId, userId }, process.env.JWT_SECRET);
+
+  const openUrl = `http://13.233.6.224:3100/api/files/open/direct/${fileId}?token=${tempToken}`;
+  res.json({ url: openUrl });
+});
+router.get("/open/direct/:id", async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) return res.status(401).json({ error: "No token provided" });
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const fileId = parseInt(req.params.id);
+
+    if (decoded.fileId !== fileId)
+      return res.status(403).json({ error: "Invalid token for this file" });
+
+    const file = await db("files").where({ id: fileId }).first();
+    if (!file || !fs.existsSync(file.file_path))
+      return res.status(404).json({ error: "File not found" });
+
+    const mime = require("mime-types");
+    const mimeType =
+      file.mime_type ||
+      mime.lookup(file.file_path) ||
+      "application/octet-stream";
+
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Content-Disposition", `inline; filename="${file.name}"`);
+
+    fs.createReadStream(file.file_path).pipe(res);
+  } catch (err) {
+    console.error("❌ [open/direct] Error:", err);
+    return res.status(401).json({ error: "Invalid or expired link" });
+  }
+});
 router.get("/", authMiddleware, getFiles);
 router.put(
   "/:id",
