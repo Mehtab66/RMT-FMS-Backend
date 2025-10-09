@@ -52,10 +52,10 @@ const uploadMultiple = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 100 * 1024 * 1024, // 100MB per file
-    files: 200,
-    fields: 500, // allow up to 500 fields instead of 10
-    parts: 1000, // allow more total parts (fields + files)
+    fileSize: 1024 * 1024 * 1024, // 1 GB per file
+    files: 100000,
+    fields: 100000,
+    parts: 200000,
   },
 });
 
