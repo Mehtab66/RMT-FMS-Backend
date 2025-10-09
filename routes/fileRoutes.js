@@ -13,6 +13,7 @@ const {
   getTrashFilesController,
   restoreFileController,
   permanentDeleteFileController,
+  openFile,
 } = require("../controllers/fileController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const checkPermission = require("../middlewares/permissionMiddleware");
@@ -148,6 +149,8 @@ const setFileResourceInfo = (req, res, next) => {
 
 // Other routes remain the same...
 router.get("/download/:id", authMiddleware, setFileResourceInfo, downloadFile);
+router.get("/open/:id", authMiddleware, openFile);
+
 router.get("/", authMiddleware, getFiles);
 router.put(
   "/:id",

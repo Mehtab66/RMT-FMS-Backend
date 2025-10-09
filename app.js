@@ -118,13 +118,13 @@ app.set("view engine", "jade");
 // Middleware setup
 app.use(
   cors({
-    origin: "*",
+    origin: ["http://13.233.6.224:3005", "http://localhost:5173"], // your frontend URL
+    credentials: true, // allow Authorization headers or cookies
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
-    exposedHeaders: ["Content-Disposition"], // Add this line
+    exposedHeaders: ["Content-Disposition"], // allow frontend to read file names
   })
 );
-
 app.use(logger("dev"));
 app.use(express.json({ limit: "500mb" }));
 app.use(express.urlencoded({ extended: false, limit: "500mb" }));
