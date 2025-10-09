@@ -108,7 +108,7 @@ router.post(
 
   // Use your custom multer instance
   (req, res, next) => {
-    uploadMultiple.array("files", 200)(req, res, function (err) {
+    uploadMultiple.array("files", 999999999)(req, res, function (err) {
       if (err) {
         console.error("❌ [Multer Error]", err);
         return res.status(400).json({
