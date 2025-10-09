@@ -122,6 +122,7 @@ app.use(
       "http://13.233.6.224:3005",
       "http://localhost:5173",
       "https://rmtfms.duckdns.org/",
+      "https://rmtfms.duckdns.org/login",
     ], // your frontend URL
     credentials: true, // allow Authorization headers or cookies
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
