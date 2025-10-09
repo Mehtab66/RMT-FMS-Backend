@@ -120,6 +120,8 @@ app.use(
   cors({
     origin: [
       "http://13.233.6.224:3005",
+      "https://13.233.6.224",
+
       "http://localhost:5173",
       "https://rmtfms.duckdns.org/",
       "https://rmtfms.duckdns.org/login",
