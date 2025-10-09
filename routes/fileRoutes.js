@@ -46,10 +46,16 @@ const fileFilter = (req, file, cb) => {
 };
 
 const uploadMultiple = multer({
-  storage: storage,
-  fileFilter: fileFilter,
-  limits: { fileSize: 100 * 1024 * 1024, files: 100, fields: 10, parts: 150 },
+  storage,
+  fileFilter,
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB per file
+    files: 200,
+    fields: 500, // allow up to 500 fields instead of 10
+    parts: 1000, // allow more total parts (fields + files)
+  },
 });
+
 
 // Multer configuration that preserves folder structure
 const upload = multer({
@@ -86,7 +92,6 @@ const setUploadResourceInfo = (req, res, next) => {
 router.post(
   "/upload-folder",
   authMiddleware,
-  // Add detailed logging middleware
   (req, res, next) => {
     console.log("🔍 [Multer Debug] Starting upload-folder request");
     console.log("🔍 [Multer Debug] Headers:", {
@@ -99,36 +104,19 @@ router.post(
     next();
   },
 
-  // Multer middleware with error handling
+  // Use your custom multer instance
   (req, res, next) => {
-    upload.array("files", 200)(req, res, function (err) {
+    uploadMultiple.array("files", 200)(req, res, function (err) {
       if (err) {
         console.error("❌ [Multer Error]", err);
-        console.error("❌ [Multer Error] Details:", {
-          code: err.code,
-          field: err.field,
-          message: err.message,
-        });
         return res.status(400).json({
           message: "File upload failed",
           error: err.message,
         });
       }
       console.log("✅ [Multer Success] Files processed:", {
-        fileCount: req.files ? req.files.length : 0,
-        files: req.files
-          ? req.files.map((f) => ({
-              originalname: f.originalname,
-              size: f.size,
-              mimetype: f.mimetype,
-              filename: f.filename,
-            }))
-          : "no files",
+        count: req.files?.length || 0,
       });
-      console.log(
-        "✅ [Multer Success] Body after Multer:",
-        Object.keys(req.body)
-      );
       next();
     });
   },
