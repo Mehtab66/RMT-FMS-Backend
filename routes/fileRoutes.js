@@ -160,7 +160,7 @@ router.get("/open/:id/url", authMiddleware, async (req, res) => {
   // Generate short-lived signed token (valid 1 minute)
   const tempToken = jwt.sign({ fileId, userId }, process.env.JWT_SECRET);
 
-  const openUrl = `http://13.233.6.224:3100/api/files/open/direct/${fileId}?token=${tempToken}`;
+  const openUrl = `https://rmtfms.duckdns.org/api/files/open/direct/${fileId}?token=${tempToken}`;
   res.json({ url: openUrl });
 });
 router.get("/open/direct/:id", async (req, res) => {
